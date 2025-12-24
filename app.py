@@ -43,23 +43,29 @@ st.line_chart(data)
 
 
 
-
 st.markdown(
     """
     <style>
     .footer {
         position: fixed;
-        bottom: 70px;        /* moved up so it clears the Manage toggle */
+        bottom: 70px;        
         right: 15px;
-        color: #9a9a9a;
+        color: #c1121f;
         font-size: 13px;
-        font-weight: 500;
-        z-index: 1000;       /* makes sure it’s always visible */
+        font-weight: 600;
+
+        border: 1.5px solid #c1121f;
+        background: #ffe5e8;
+        padding: 6px 10px;
+        border-radius: 10px;
+
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        z-index: 1000;
     }
     </style>
 
     <div class="footer">
-        Built by Harbhajan — Portfolio Project
+        🚀 Built by Harbhajan The Great
     </div>
     """,
     unsafe_allow_html=True
