@@ -1,0 +1,33 @@
+🔹 Walk through how covariance pushes TSLA weight to zero sometimes
+
+2️⃣ Minimum-Volatility Portfolio
+
+Instead of maximizing Sharpe,
+
+find portfolio with lowest risk.
+
+You’ll see how optimization objective changes.
+
+3️⃣ Plot Portfolio Performance
+
+Add:
+
+cumulative growth comparison
+
+rolling Sharpe comparison
+
+So user can visually confirm the optimizer.
+
+4️⃣ Efficient Frontier (Advanced)
+
+Full interactive MPT frontier:
+
+curve showing all possible portfolios
+
+highlight optimal portfolio points
+
+This is what hedge funds show clients.
+
+5️⃣ Save Portfolio / Pie Chart
+
+User can save and reuse portfolio allocations.
