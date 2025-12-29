@@ -292,51 +292,51 @@ with tab_benchmark:
         end=end_date,
         auto_adjust=True,
         progress=False
-    )["Close"].dropna()
+    )["Close"]
 
-# Align portfolio and benchmark to common overlap
-combined = pd.concat([cumulative, benchmark], axis=1).dropna()
+    # Benchmark cumulative for charting
+    benchmark_returns = benchmark.pct_change().dropna()
+    benchmark_cumulative = (1 + benchmark_returns).cumprod()
 
-portfolio_total = combined.iloc[-1, 0] - 1
-benchmark_total = combined.iloc[-1, 1] - 1
-alpha = (portfolio_total - benchmark_total) * 100
-color = "green" if alpha >= 0 else "red"
+    # Align portfolio and benchmark to common overlap
+    combined = pd.concat([cumulative, benchmark_cumulative], axis=1).dropna()
 
-# Benchmark cumulative for charting
-benchmark_returns = benchmark.pct_change().dropna()
-benchmark_cumulative = (1 + benchmark_returns).cumprod()
+    portfolio_total = combined.iloc[-1, 0] - 1
+    benchmark_total = combined.iloc[-1, 1] - 1
+    alpha = (portfolio_total - benchmark_total) * 100
+    color = "green" if alpha >= 0 else "red"
 
-# Prepare DataFrames for chart
-portfolio_df = cumulative.to_frame(name="Portfolio") if not isinstance(cumulative, pd.DataFrame) else cumulative.rename(columns={cumulative.columns[0]: "Portfolio"})
-benchmark_df = benchmark_cumulative.to_frame(name=benchmark_label) if not isinstance(benchmark_cumulative, pd.DataFrame) else benchmark_cumulative.rename(columns={benchmark_cumulative.columns[0]: benchmark_label})
+    # Prepare DataFrames for chart
+    portfolio_df = cumulative.to_frame(name="Portfolio") if not isinstance(cumulative, pd.DataFrame) else cumulative.rename(columns={cumulative.columns[0]: "Portfolio"})
+    benchmark_df = benchmark_cumulative.to_frame(name=benchmark_label) if not isinstance(benchmark_cumulative, pd.DataFrame) else benchmark_cumulative.rename(columns={benchmark_cumulative.columns[0]: benchmark_label})
 
-compare_df = (
-    pd.concat([portfolio_df, benchmark_df], axis=1)
-    .dropna()
-    .reset_index()
-)
-
-chart_compare = (
-    alt.Chart(compare_df)
-    .mark_line()
-    .encode(
-        x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', labelAngle=0)),
-        y=alt.Y("value:Q", title="Growth Index"),
-        color=alt.Color("variable:N", legend=alt.Legend(title=None))
+    compare_df = (
+        pd.concat([portfolio_df, benchmark_df], axis=1)
+        .dropna()
+        .reset_index()
     )
-    .transform_fold(["Portfolio", benchmark_label], as_=["variable", "value"])
-    .properties(height=420, width=1000, title="Portfolio vs Benchmark Performance")
-)
-st.altair_chart(chart_compare, use_container_width=False)
 
-st.markdown(
-    f"""
-    <h4>📈 Alpha vs {benchmark_label}: 
-    <span style='color:{color}'>{alpha:.2f}%</span>
-    </h4>
-    """,
-    unsafe_allow_html=True
-)
+    chart_compare = (
+        alt.Chart(compare_df)
+        .mark_line()
+        .encode(
+            x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', labelAngle=0)),
+            y=alt.Y("value:Q", title="Growth Index"),
+            color=alt.Color("variable:N", legend=alt.Legend(title=None))
+        )
+        .transform_fold(["Portfolio", benchmark_label], as_=["variable", "value"])
+        .properties(height=420, width=1000, title="Portfolio vs Benchmark Performance")
+    )
+    st.altair_chart(chart_compare, use_container_width=False)
+
+    st.markdown(
+        f"""
+        <h4>📈 Alpha vs {benchmark_label}: 
+        <span style='color:{color}'>{alpha:.2f}%</span>
+        </h4>
+        """,
+        unsafe_allow_html=True
+    )
 
 # ============================================
 # MONTE CARLO TAB

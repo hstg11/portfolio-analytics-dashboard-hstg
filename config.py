@@ -24,7 +24,7 @@ def init_google_sheets():
 
 # ------------------ Cookie Settings ------------------
 COOKIE_PREFIX = "portfolio_dashboard"
-COOKIE_PASSWORD = st.secrets.get("cookie_password", "default")
+COOKIE_PASSWORD = "super_secret_password_change_me"
 
 # ------------------ Google Sheets ------------------
 GOOGLE_SHEETS_SCOPE = [
