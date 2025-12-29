@@ -1,33 +1,36 @@
-🔹 Walk through how covariance pushes TSLA weight to zero sometimes
+x
+Phase 3: Advanced Financial Features
+From Calculator to Professional Tool.
 
-2️⃣ Minimum-Volatility Portfolio
+📉 Minimum Volatility Portfolio: Option to find the "Safest" allocation.
 
-Instead of maximizing Sharpe,
+⚔️ Manual vs. Optimized Charts: Visual comparison of performance curves.
 
-find portfolio with lowest risk.
+🏔️ The Efficient Frontier: The "Hedge Fund" scatter plot.
+Generate 2,000+ random portfolios.
 
-You’ll see how optimization objective changes.
+Plot Risk vs. Return scatter plot.
 
-3️⃣ Plot Portfolio Performance
+Draw the "Frontier Curve" to show the user where their portfolio sits relative to the market potential.
 
-Add:
+User Constraints
 
-cumulative growth comparison
+Phase 4: UX & Polish
+Education and Usability.
 
-rolling Sharpe comparison
+🎓 Educational Tooltips: Small ? icons explaining "Sharpe Ratio", "VaR", etc., in plain English. Also
+Walk through how covariance pushes TSLA weight to zero sometimes(explain to me and add to UI)
+UX Note: Explicit instructions for Indian stocks (e.g., "Use .NS for NSE stocks like RELIANCE.NS").
 
-So user can visually confirm the optimizer.
 
-4️⃣ Efficient Frontier (Advanced)
+📜 Disclaimer Modal: Standard "Not Financial Advice" footer/popup.
 
-Full interactive MPT frontier:
+___
 
-curve showing all possible portfolios
 
-highlight optimal portfolio points
-
-This is what hedge funds show clients.
-
-5️⃣ Save Portfolio / Pie Chart
-
-User can save and reuse portfolio allocations.
+Very optional rn:
+📱 Mobile Compatibility: Ensure charts and tables don't break on small screens.
+🖨️ Export Report: A button to download a PDF or CSV summary.
+⏱️ Screen Time Tracking: Measure session duration.
+Calculate session_end_time - session_start_time.
+Update the users sheet with a "Minutes Spent" metric.
