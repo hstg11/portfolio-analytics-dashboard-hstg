@@ -1,30 +1,43 @@
-# --- virtual environments ---
-venv/
-.venv/
-
-# --- python cache/bytecode ---
+# Python cache
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
 
-# --- environment / secrets ---
-.env
-.env.*
+# Virtual environment
+venv/
+env/
+ENV/
+.venv
 
-# --- Jupyter notebooks checkpoints ---
-.ipynb_checkpoints/
+# Streamlit secrets (CRITICAL!)
+.streamlit/secrets.toml
+secrets.toml
 
-# --- OS files ---
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# --- build artifacts ---
-dist/
-build/
+# Jupyter notebooks
+.ipynb_checkpoints
 
-# --- Streamlit local app state ---
-.streamlit/
+# Environment variables
+.env
+.env.local
 
-# --- logs ---
+# Local test files
+notes.txt
+test_*.py
+
+# Logs
 *.log
+
+# Docker
+.devcontainer/

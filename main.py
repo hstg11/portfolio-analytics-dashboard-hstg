@@ -3,125 +3,255 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import altair as alt
+from google.oauth2.service_account import Credentials
+import gspread
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from streamlit_cookies_manager import EncryptedCookieManager
 
-from auth import *
-from portfolio import *
-from optimizer import *
-from config import *
+# ---------------- COOKIE MANAGER ----------------
+cookies = EncryptedCookieManager(
+    prefix="portfolio_app_",
+    password="your-secret-password-change-this-12345"
+)
+
+if not cookies.ready():
+    st.stop()
+
+# ---------------- ACTIVE WEIGHTS TRACKING ----------------
+if "active_weights" not in st.session_state:
+    st.session_state["active_weights"] = None
+
+if "active_weights_source" not in st.session_state:
+    st.session_state["active_weights_source"] = "manual"
+
+
+# ---------------- GOOGLE SHEETS ----------------
+SCOPE = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=SCOPE
+)
+
+gc = gspread.authorize(creds)
+
+SHEET_NAME = "portfolio_users"
+sh = gc.open(SHEET_NAME)
+
+users_ws = sh.worksheet("users")
+portfolios_ws = sh.worksheet("portfolios")
+
+# ---------------- GOOGLE SHEETS (OPTIMIZED) ----------------
+@st.cache_data(ttl=600)
+def fetch_users_data():
+    try:
+        data = users_ws.get_all_records()
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df.columns = [c.strip().lower() for c in df.columns]
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+users_df = fetch_users_data()
+
+
+# ---------------- HELPERS ----------------
+def now_ist():
+    """Return current datetime in IST."""
+    return datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S IST")
+
+
+def user_exists(email):
+    if users_df.empty:
+        return False
+    if "email" not in users_df.columns:
+        return False
+    return email.lower() in users_df["email"].str.lower().values
+
+
+def save_user(email, name, phone, city):
+    now = now_ist()
+    records = users_ws.col_values(1)
+
+    if email in records:
+        row_index = records.index(email) + 1
+        users_ws.update_cell(row_index, 6, now)
+    else:
+        users_ws.append_row([email, name, phone, city, now, now])
+
+
+def save_portfolio(email, tickers, weights, opt_weights=None):
+    portfolios_ws.append_row([
+        email,
+        ",".join(tickers),
+        ",".join([str(round(w, 4)) for w in weights]),
+        ",".join([str(round(w, 4)) for w in opt_weights]) if opt_weights else "",
+        now_ist()
+    ])
+
 
 st.set_page_config(layout="wide")
 
-# ============================================
-# INITIALIZE SERVICES
-# ============================================
-cookies = init_cookie_manager()
-users_ws, portfolios_ws = init_google_sheets()
-users_df = fetch_users_data(users_ws)
-
-# ============================================
-# SESSION STATE
-# ============================================
+# ---------------- SESSION FLAGS ----------------
 if "signed_up" not in st.session_state:
     st.session_state["signed_up"] = False
 
 if "user_email" not in st.session_state:
     st.session_state["user_email"] = None
 
-if "use_optimized" not in st.session_state:
-    st.session_state["use_optimized"] = False
-
-if "opt_weights" not in st.session_state:
-    st.session_state["opt_weights"] = None
-
-if "loaded_tickers" not in st.session_state:
-    st.session_state["loaded_tickers"] = None
-
-if "loaded_weights" not in st.session_state:
-    st.session_state["loaded_weights"] = None
-
-# ============================================
-# SIGNUP GATE (BEFORE ANYTHING ELSE)
-# ============================================
+# Check if user has a login cookie
 if not st.session_state["signed_up"]:
-    show_signup_gate(users_df, users_ws, cookies)
+    stored_email = cookies.get("user_email")
+    if stored_email:
+        st.session_state["signed_up"] = True
+        st.session_state["user_email"] = stored_email
+        
+        if user_exists(stored_email):
+            user_row = users_df[users_df["email"] == stored_email.lower()]
+            if not user_row.empty:
+                name = user_row.iloc[0].get("name", "")
+                phone = user_row.iloc[0].get("phone", "")
+                city = user_row.iloc[0].get("city", "")
+                save_user(stored_email, name, phone, city)
 
-# ============================================
-# MAIN DASHBOARD
-# ============================================
+
+# ---------------- SIGNUP GATE ----------------
+if not st.session_state["signed_up"]:
+    st.title("🔐 Welcome – Please Sign Up")
+
+    name = st.text_input("Full Name")
+    email = st.text_input("Email Address")
+    phone = st.text_input("Mobile Number")
+    city = st.text_input("City")
+
+    if st.button("Continue ➜"):
+        if not email: 
+            st.warning("Email is required.")
+            st.stop()
+
+        if user_exists(email):
+            st.success("Welcome back! Loading dashboard…")
+            st.session_state["signed_up"] = True
+            st.session_state["user_email"] = email
+            cookies["user_email"] = email 
+            cookies.save()
+            save_user(email, name if name else "Returning User", phone, city)
+            st.rerun()
+        else:
+            if not name or not phone or not city:
+                st.warning("Please fill in all fields for new registration.")
+                st.stop()
+                
+            save_user(email, name, phone, city)
+            st.success("Signup complete! Loading dashboard…")
+            st.session_state["signed_up"] = True
+            st.session_state["user_email"] = email
+            cookies["user_email"] = email 
+            cookies.save()
+            st.rerun()
+
+    st.stop()
+
+
 st.title("📊 Portfolio Performance & Risk Dashboard")
-st.write("Analyze returns, risk, and benchmark performance in one place.")
 
+st.write("Analyze returns, risk, and benchmark performance in one place.")
 st.sidebar.header("Portfolio Inputs")
 
-# Ticker input - reads from loaded portfolio
-if st.session_state["loaded_tickers"] is not None:
-    default_tickers = ",".join(st.session_state["loaded_tickers"])
-    st.session_state["loaded_tickers"] = None
-else:
-    default_tickers = "AAPL,MSFT,AMZN,META,GOOG"
-
+# 1. INPUT: Ticker List
 tickers = st.sidebar.text_input(
     "Enter stock tickers (comma separated)",
-    value=default_tickers
+    value="AAPL,MSFT, AMZN, META, GOOG"
 )
+tickers_list = [t.strip() for t in tickers.split(",")]
 
 start_date = st.sidebar.date_input("Start Date", value=pd.to_datetime("2020-01-01"))
 end_date = st.sidebar.date_input("End Date", value=pd.to_datetime("today"))
 
-tickers_list = [t.strip() for t in tickers.split(",")]
 
-# Weight sliders - reads from loaded portfolio
+# ---------------- LOGIC: AUTO-RESET IF TICKERS CHANGE ----------------
+if "last_ticker_count" not in st.session_state:
+    st.session_state["last_ticker_count"] = len(tickers_list)
+
+if len(tickers_list) != st.session_state["last_ticker_count"]:
+    st.session_state["last_ticker_count"] = len(tickers_list)
+    st.session_state["active_weights"] = None
+    st.session_state["active_weights_source"] = "manual"
+    
+    for key in list(st.session_state.keys()):
+        if key.startswith("weight_"):
+            del st.session_state[key]
+            
+    st.rerun()
+
+
+# ---------------- LOGIC: REVERT BUTTON CALLBACK ----------------
+def revert_to_manual():
+    st.session_state["active_weights"] = None
+    st.session_state["active_weights_source"] = "manual"
+    
+    # Delete slider memories to force reset to equal weights
+    for key in list(st.session_state.keys()):
+        if key.startswith("weight_"):
+            del st.session_state[key]
+
+
+# ---------------- UI: WEIGHT SLIDERS ----------------
 st.sidebar.subheader("🎚 Portfolio Weights (in %)")
 
-weights = []
-for i, t in enumerate(tickers_list):
-    if st.session_state["loaded_weights"] is not None and i < len(st.session_state["loaded_weights"]):
-        default_weight = st.session_state["loaded_weights"][i] * 100
-    else:
-        default_weight = round(100 / len(tickers_list), 2)
-    
+default_weight = round(100 / len(tickers_list), 2)
+manual_weights_pct = []
+
+for t in tickers_list:
     w = st.sidebar.number_input(
         f"Weight for {t}",
         min_value=0.0,
         max_value=100.0,
-        value=default_weight
+        value=default_weight,
+        step=5.0,
+        key=f"weight_{t}" 
     )
-    weights.append(w)
+    manual_weights_pct.append(w)
 
-# Clear loaded weights after use
-if st.session_state["loaded_weights"] is not None:
-    st.session_state["loaded_weights"] = None
+manual_weights = [w / 100 for w in manual_weights_pct]
 
-weights = [w / 100 for w in weights]
 
-# ============================================
-# OPTIMIZER OVERRIDE
-# ============================================
-if st.session_state["use_optimized"] and st.session_state["opt_weights"] is not None:
-    if len(st.session_state["opt_weights"]) == len(tickers_list):
-        weights = st.session_state["opt_weights"]
+# ---------------- LOGIC: DETERMINE FINAL WEIGHTS ----------------
+weights = manual_weights
+
+if st.session_state["active_weights"] is not None:
+    if len(st.session_state["active_weights"]) == len(tickers_list):
+        weights = st.session_state["active_weights"]
         st.sidebar.success("✅ Using Optimized Weights")
-        
-        if st.sidebar.button("🔄 Back to Manual Weights"):
-            st.session_state["use_optimized"] = False
-            st.rerun()
+        st.sidebar.button("🔄 Revert to Manual Weights", on_click=revert_to_manual)
     else:
-        st.session_state["use_optimized"] = False
-        st.sidebar.info("ℹ️ Using Manual Weights")
+        st.session_state["active_weights"] = None
+        st.session_state["active_weights_source"] = "manual"
+        weights = manual_weights
+        st.rerun()
 else:
     st.sidebar.info("ℹ️ Using Manual Weights")
 
-# ============================================
-# WEIGHT VALIDATION
-# ============================================
-if abs(sum(weights) - 1) > 0.001:
-    st.sidebar.warning("⚠️ Weights must add up to 100%. Adjust them to continue.")
-else:
-    st.sidebar.caption("✅ Total: 100%")
 
-# ============================================
-# DOWNLOAD DATA
-# ============================================
+# ---------------- CHECK: SUM TO 100% ----------------
+current_sum = sum(weights)
+
+if st.session_state["active_weights"] is None:
+    if abs(current_sum - 1.0) > 0.001:
+        st.sidebar.error(f"⚠️ Total: {current_sum*100:.2f}%")
+        st.sidebar.warning("Weights must sum to 100%. Please adjust.")
+    else:
+        st.sidebar.caption("✅ Total: 100%")
+else:
+    st.sidebar.caption("✅ Total: 100% (Optimized)")
+
+
+# ---------------- DATA DOWNLOAD ----------------
 raw = yf.download(
     tickers_list,
     start=start_date,
@@ -136,16 +266,10 @@ risk_free = st.sidebar.number_input(
     step=0.25
 ) / 100
 
-# ============================================
-# TABS
-# ============================================
 tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer = st.tabs(
     ["📊 Overview", "⚠️ Risk", "📈 Benchmark", "🎲 Monte Carlo" , "Optimizer"]
 )
 
-# ============================================
-# OVERVIEW TAB
-# ============================================
 with tab_overview:
     st.subheader("📈 Price History")
     data = raw["Close"]
@@ -154,7 +278,6 @@ with tab_overview:
         data = raw["Adj Close"]
 
     data = data.dropna()
-    first_date = data.index[0]
 
     price_df = data.reset_index().melt('Date', var_name='Ticker', value_name='Price')
 
@@ -162,7 +285,10 @@ with tab_overview:
         alt.Chart(price_df)
         .mark_line()
         .encode(
-            x=alt.X('Date:T', axis=alt.Axis(format='%b %Y', labelAngle=0, labelOverlap=True)),
+            x=alt.X(
+                'Date:T',
+                axis=alt.Axis(format='%b %Y', labelAngle=0, labelOverlap=True)
+            ),
             y=alt.Y('Price:Q'),
             color=alt.Color('Ticker:N', legend=alt.Legend(orient='bottom', title=None))
         )
@@ -184,9 +310,6 @@ if returns.shape[1] != len(weights):
 portfolio_return = returns.dot(weights)
 cumulative = (1 + portfolio_return).cumprod()
 
-# ============================================
-# RISK TAB
-# ============================================
 with tab_risk:
     st.header("📉 Portfolio Risk Metrics")
     trading_days = 252
@@ -259,15 +382,12 @@ with tab_risk:
     with st.expander("🔍 What does Rolling Volatility & Sharpe mean?"):
         st.markdown("""
     **Rolling Volatility:**  
-    Shows when portfolio shifted from **calm** to **turbulent**.
+    Shows when markets shifted from **calm** to **turbulent**.
 
     **Rolling Sharpe:**  
     Reveals when the portfolio delivered **good vs poor risk-adjusted returns**.
         """)
 
-# ============================================
-# BENCHMARK TAB
-# ============================================
 with tab_benchmark:
     st.header("📊 Portfolio vs Benchmark")
     st.sidebar.subheader("📌 Benchmark Comparison")
@@ -288,7 +408,7 @@ with tab_benchmark:
 
     benchmark = yf.download(
         benchmark_symbol,
-        start=first_date,
+        start=start_date,
         end=end_date,
         auto_adjust=True,
         progress=False
@@ -342,9 +462,6 @@ with tab_benchmark:
         unsafe_allow_html=True
     )
 
-# ============================================
-# MONTE CARLO TAB
-# ============================================
 with tab_monte:
     st.header("🎲 Monte Carlo Simulation")
     st.write("""
@@ -447,23 +564,20 @@ with tab_monte:
     and returns. They do **not** guarantee outcomes, but help visualize risk and uncertainty.
     """)
 
-# ============================================
-# OPTIMIZER TAB
-# ============================================
 with tab_optimizer:
     from scipy.optimize import minimize
 
     st.header("🔧 Portfolio Optimizer – Max Sharpe")
 
-    def portfolio_return_opt(weights, mean_returns):
+    def portfolio_return(weights, mean_returns):
         return np.dot(weights, mean_returns)
 
-    def portfolio_volatility_opt(weights, cov_matrix):
+    def portfolio_volatility(weights, cov_matrix):
         return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
 
     def neg_sharpe(weights, mean_returns, cov_matrix, risk_free):
-        ret = portfolio_return_opt(weights, mean_returns)
-        vol = portfolio_volatility_opt(weights, cov_matrix)
+        ret = portfolio_return(weights, mean_returns)
+        vol = portfolio_volatility(weights, cov_matrix)
         return -((ret - risk_free) / vol)
 
     def max_sharpe_portfolio(mean_returns, cov_matrix, risk_free):
@@ -485,8 +599,8 @@ with tab_optimizer:
     def get_max_sharpe_portfolio(mean_returns, cov_matrix, risk_free):
         result = max_sharpe_portfolio(mean_returns, cov_matrix, risk_free)
         opt_weights = result.x
-        ret = portfolio_return_opt(opt_weights, mean_returns)
-        vol = portfolio_volatility_opt(opt_weights, cov_matrix)
+        ret = portfolio_return(opt_weights, mean_returns)
+        vol = portfolio_volatility(opt_weights, cov_matrix)
         sharpe = (ret - risk_free) / vol
         return opt_weights, ret, vol, sharpe
 
@@ -494,14 +608,14 @@ with tab_optimizer:
     cov_matrix   = returns.cov() * 252
 
     if st.button("🚀 Optimize (Max Sharpe)"):
-        opt_weights_calc, ret, vol, sharpe = get_max_sharpe_portfolio(
+        opt_weights, ret, vol, sharpe = get_max_sharpe_portfolio(
             mean_returns, cov_matrix, risk_free
         )
-        st.session_state["opt_weights"] = opt_weights_calc
+        st.session_state["opt_weights"] = opt_weights
         st.session_state["opt_stats"] = (ret, vol, sharpe)
 
     if "opt_weights" in st.session_state and "opt_stats" in st.session_state:
-        opt_weights_display = st.session_state["opt_weights"]
+        opt_weights = st.session_state["opt_weights"]
         ret, vol, sharpe = st.session_state["opt_stats"]
 
         def portfolio_stats(weights, mean_returns, cov_matrix, risk_free):
@@ -510,25 +624,23 @@ with tab_optimizer:
             sharpe = (port_return - risk_free) / port_vol if port_vol != 0 else 0
             return port_return, port_vol, sharpe
 
-        manual_weights_for_compare = []
-        for t in tickers_list:
-            w = st.session_state.get(f"number_input_{t}", round(100 / len(tickers_list), 2))
-            manual_weights_for_compare.append(w / 100)
+        manual_weights_array = np.array(manual_weights)
 
-        if opt_weights_display.shape[0] != mean_returns.shape[0]:
-            st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
-            opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
-            st.session_state["opt_weights"] = opt_weights_display
+        if opt_weights.shape[0] != mean_returns.shape[0]:
+            st.warning("Optimizer weights were from an older ticker list – resetting.")
+            opt_weights = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
+            st.session_state["opt_weights"] = opt_weights
 
         opt_ret, opt_vol, opt_sharpe = portfolio_stats(
-            opt_weights_display, mean_returns, cov_matrix, risk_free
-        )
-        
-        manual_ret, manual_vol, manual_sharpe = portfolio_stats(
-            np.array(manual_weights_for_compare), mean_returns, cov_matrix, risk_free
+            opt_weights, mean_returns, cov_matrix, risk_free
         )
 
         st.subheader("📊 Manual vs Optimized Portfolio (Annualized)")
+        
+        manual_ret, manual_vol, manual_sharpe = portfolio_stats(
+            manual_weights_array, mean_returns, cov_matrix, risk_free
+        )
+        
         compare_df = pd.DataFrame({
             "Metric": ["Expected Return", "Volatility (Risk)", "Sharpe Ratio"],
             "Manual": [f"{manual_ret*100:.2f}%", f"{manual_vol*100:.2f}%", f"{manual_sharpe:.2f}"],
@@ -540,89 +652,43 @@ with tab_optimizer:
         opt_df = pd.DataFrame({
             "S.No": np.arange(1, len(mean_returns) + 1),
             "Asset": mean_returns.index,
-            "Weight %": (opt_weights_display * 100).round(2)
+            "Weight %": (opt_weights * 100).round(2)
         })
         total_row = pd.DataFrame([["TOTAL", "—", opt_df["Weight %"].sum().round(2)]],
                                  columns=["S.No", "Asset", "Weight %"])
         opt_df = pd.concat([opt_df, total_row], ignore_index=True)
         st.dataframe(opt_df, hide_index=True)
 
-        if st.button("✅ Apply These Weights", type="primary"):
-            st.session_state["use_optimized"] = True
-            st.success("✅ Optimized weights applied!")
+        col1 = st.columns(1)
+        if st.button("✅ Apply These Weights to Portfolio", type="primary", use_container_width=False):
+            st.session_state["active_weights"] = opt_weights
+            st.session_state["active_weights_source"] = "optimized"
+            st.success("✅ Optimized weights applied! All tabs now use these weights.")
             st.rerun()
 
-# ============================================
-# SIDEBAR: SAVE/LOAD PORTFOLIOS
-# ============================================
-st.sidebar.markdown("---")
-
-# Load Portfolio Section
-try:
-    all_portfolios = portfolios_ws.get_all_records()
-    
-    # Filter user portfolios safely
-    user_portfolios = [
-        p for p in all_portfolios 
-        if st.session_state.get("user_email") and 
-           p.get("email", "").lower() == st.session_state["user_email"].lower()
-    ]
-
-    if user_portfolios:
-        st.sidebar.subheader("📂 Saved Portfolios")
-        
-        portfolio_options = [f"{p['portfolio_name']}" for p in user_portfolios]
-        
-        selected_display = st.sidebar.selectbox(
-            "Choose a portfolio:",
-            portfolio_options
-        )
-        
-        if st.sidebar.button("🚀 Load Portfolio"):
-            selected_index = portfolio_options.index(selected_display)
-            chosen = user_portfolios[selected_index]
-            
-            loaded_tickers = chosen["tickers"].split(",")
-            loaded_weights = [float(w) for w in chosen["weight"].split(",")]
-            
-            st.session_state["loaded_tickers"] = loaded_tickers
-            st.session_state["loaded_weights"] = loaded_weights
-            
-            if chosen.get("optimized_weights"):
-                opt_weights_str = chosen["optimized_weights"]
-                if opt_weights_str:
-                    st.session_state["opt_weights"] = [float(w) for w in opt_weights_str.split(",")]
-                    st.session_state["use_optimized"] = True
-            
-            st.sidebar.success(f"✅ Loading {chosen['portfolio_name']}...")
-            st.rerun()
-
-except Exception as e:
-    st.sidebar.error(f"Error loading portfolios: {e}")
-
-# Save Portfolio
-portfolio_name = st.sidebar.text_input("Portfolio Name", placeholder="e.g., Tech Growth")
-
-if st.sidebar.button("💾 Save Portfolio Snapshot"):
+if st.sidebar.button("💾 Log/Save Portfolio Snapshot"):
     try:
-        # Get user's name from users_df
-        user_row = users_df[users_df["email"] == st.session_state["user_email"].lower()]
-        user_name = user_row.iloc[0]["name"] if not user_row.empty else "Unknown"
-
         save_portfolio(
             st.session_state["user_email"],
-            user_name,
-            portfolio_name if portfolio_name else "Untitled Portfolio",
             tickers_list,
             weights,
-            portfolios_ws,
-            st.session_state.get("opt_weights") if st.session_state["use_optimized"] else None
+            st.session_state.get("active_weights") 
         )
-        st.sidebar.success("✅ Saved!")
+        st.sidebar.success("✅ Portfolio saved to Sheets!")
     except Exception as e:
-        st.sidebar.error(f"Error: {e}")
+        st.sidebar.error(f"Error saving: {e}")
 
+st.sidebar.markdown("---")
 
+if st.sidebar.button("Logout"):
+    if "user_email" in cookies:
+        cookies.delete("user_email")
+        cookies.save()
+    
+    st.session_state["signed_up"] = False
+    st.session_state["user_email"] = None
+    
+    st.rerun()
 
 st.markdown(
     """
@@ -644,6 +710,7 @@ st.markdown(
         z-index: 1000;
     }
     </style>
+
     <div class="footer">
         Harbhajan The Great
     </div>
