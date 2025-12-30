@@ -39,6 +39,13 @@ if "loaded_tickers" not in st.session_state:
 if "loaded_weights" not in st.session_state:
     st.session_state["loaded_weights"] = None
 
+# Persistent portfolio state
+if "current_tickers" not in st.session_state:
+    st.session_state["current_tickers"] = "AAPL,MSFT,AMZN,META,GOOG"
+
+if "current_weights_pct" not in st.session_state:
+    st.session_state["current_weights_pct"] = None
+
 # ============================================
 # SIGNUP GATE (BEFORE ANYTHING ELSE)
 # ============================================
@@ -54,16 +61,20 @@ st.write("Analyze returns, risk, and benchmark performance in one place.")
 st.sidebar.header("Portfolio Inputs")
 
 # Ticker input - reads from loaded portfolio
+# Determine ticker input value
 if st.session_state["loaded_tickers"] is not None:
     default_tickers = ",".join(st.session_state["loaded_tickers"])
     st.session_state["loaded_tickers"] = None
+    st.session_state["current_tickers"] = default_tickers
 else:
-    default_tickers = "AAPL,MSFT,AMZN,META,GOOG"
+    default_tickers = st.session_state["current_tickers"]
 
 tickers = st.sidebar.text_input(
     "Enter stock tickers (comma separated)",
     value=default_tickers
 )
+
+st.session_state["current_tickers"] = tickers
 
 start_date = st.sidebar.date_input("Start Date", value=pd.to_datetime("2020-01-01"))
 end_date = st.sidebar.date_input("End Date", value=pd.to_datetime("today"))
@@ -80,6 +91,8 @@ weights = []
 for i, t in enumerate(tickers_list):
     if st.session_state["loaded_weights"] is not None and i < len(st.session_state["loaded_weights"]):
         default_weight = st.session_state["loaded_weights"][i] * 100
+    elif st.session_state["current_weights_pct"] and i < len(st.session_state.get("current_weights_pct", [])):
+        default_weight = st.session_state["current_weights_pct"][i]
     else:
         default_weight = round(100 / len(tickers_list), 2)
     
@@ -91,7 +104,8 @@ for i, t in enumerate(tickers_list):
     )
     weights.append(w)
 
-# Clear loaded weights after use
+st.session_state["current_weights_pct"] = weights.copy()
+
 if st.session_state["loaded_weights"] is not None:
     st.session_state["loaded_weights"] = None
 
@@ -571,11 +585,15 @@ with tab_optimizer:
             st.table(compare_df)
 
             # --- Charts (unchanged) ---
-            # cumulative returns chart
+                        # cumulative returns chart
             manual_daily_ret = returns.dot(manual_weights_array)
             opt_daily_ret = returns.dot(opt_weights_display)
-            manual_cum = (1 + manual_daily_ret).cumprod()
-            opt_cum = (1 + opt_daily_ret).cumprod()
+
+            aligned_returns = pd.concat([manual_daily_ret, opt_daily_ret], axis=1).dropna()
+            aligned_returns.columns = ["Manual", "Optimized"]
+
+            manual_cum = (1 + aligned_returns["Manual"]).cumprod()
+            opt_cum = (1 + aligned_returns["Optimized"]).cumprod()
             perf_df = pd.DataFrame({
                 "Date": manual_cum.index,
                 "Manual Portfolio": manual_cum,
