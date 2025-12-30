@@ -81,6 +81,17 @@ end_date = st.sidebar.date_input("End Date", value=pd.to_datetime("today"))
 
 tickers_list = [t.strip() for t in tickers.split(",")]
 
+tickers_list = [t.strip() for t in tickers.split(",")]
+
+# ✅ Detect if ticker count changed - reset to equal weights
+if "last_ticker_count" not in st.session_state:
+    st.session_state["last_ticker_count"] = len(tickers_list)
+
+if len(tickers_list) != st.session_state["last_ticker_count"]:
+    # Ticker count changed! Reset weights
+    st.session_state["last_ticker_count"] = len(tickers_list)
+    st.session_state["current_weights_pct"] = None  # Force equal weights
+
 st.sidebar.info("""Input Guide for Indian Stocks - NSE stocks → (Ticker + `.NS`) , e.g. `RELIANCE.NS`, `INFY.NS`, `TCS.NS`""")
 
 
@@ -92,7 +103,11 @@ for i, t in enumerate(tickers_list):
     if st.session_state["loaded_weights"] is not None and i < len(st.session_state["loaded_weights"]):
         default_weight = st.session_state["loaded_weights"][i] * 100
     elif st.session_state["current_weights_pct"] and i < len(st.session_state.get("current_weights_pct", [])):
-        default_weight = st.session_state["current_weights_pct"][i]
+        # ✅ Only use stored weights if count matches
+        if len(st.session_state["current_weights_pct"]) == len(tickers_list):
+            default_weight = st.session_state["current_weights_pct"][i]
+        else:
+            default_weight = round(100 / len(tickers_list), 2)
     else:
         default_weight = round(100 / len(tickers_list), 2)
     
