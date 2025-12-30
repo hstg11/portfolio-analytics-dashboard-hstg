@@ -1,34 +1,25 @@
-signup page 
+1. Disclaimer Modal (30 min) ✅
+2. Indian Stock Help (15 min) ✅ 
+3. Stock Corelation matrix ✅
+4. Min Volatility (30 min) ✅
+
+5. Manual vs Optimized Charts (2 hours) 
+6. Efficient Frontier (4 hours) 
+
+7. Educational Tooltips (2 hours) 
+
+8. Mahi for color scheme
 
 
 
-
-Phase 3: Advanced Financial Features
-From Calculator to Professional Tool.
-
-📉 Minimum Volatility Portfolio: Option to find the "Safest" allocation.
-
-⚔️ Manual vs. Optimized Charts: Visual comparison of performance curves.
-
+Notes:
 🏔️ The Efficient Frontier: The "Hedge Fund" scatter plot.
 Generate 2,000+ random portfolios.
-
 Plot Risk vs. Return scatter plot.
-
 Draw the "Frontier Curve" to show the user where their portfolio sits relative to the market potential.
-
-User Constraints
-
-Phase 4: UX & Polish
-Education and Usability.
 
 🎓 Educational Tooltips: Small ? icons explaining "Sharpe Ratio", "VaR", etc., in plain English. Also
 Walk through how covariance pushes TSLA weight to zero sometimes(explain to me and add to UI)
-UX Note: Explicit instructions for Indian stocks (e.g., "Use .NS for NSE stocks like RELIANCE.NS").
-
-
-📜 Disclaimer Modal: Standard "Not Financial Advice" footer/popup.
-
 ___
 
 
@@ -38,3 +29,5 @@ Very optional rn:
 ⏱️ Screen Time Tracking: Measure session duration.
 Calculate session_end_time - session_start_time.
 Update the users sheet with a "Minutes Spent" metric.
+User Constraints where user can set minimum or maximum in a stock for optimization
+

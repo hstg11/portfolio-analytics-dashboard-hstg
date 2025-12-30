@@ -70,6 +70,9 @@ end_date = st.sidebar.date_input("End Date", value=pd.to_datetime("today"))
 
 tickers_list = [t.strip() for t in tickers.split(",")]
 
+st.sidebar.info("""Input Guide for Indian Stocks - NSE stocks → (Ticker + `.NS`) , e.g. `RELIANCE.NS`, `INFY.NS`, `TCS.NS`""")
+
+
 # Weight sliders - reads from loaded portfolio
 st.sidebar.subheader("🎚 Portfolio Weights (in %)")
 
@@ -211,6 +214,67 @@ with tab_risk:
     col4.metric("VaR (95%)", f"{var_95:.2f}%")
     col4.caption("On a bad day, you may lose **about this much or worse** (5% chance).")
 
+    
+    # --- Correlation Matrix Heatmap ---
+    st.subheader("📊 Correlation matrix of assets")
+    st.caption("Lower correlation improves diversification and can reduce portfolio volatility.")
+
+    if returns.shape[1] < 2:
+        st.info("Add at least two tickers to view correlations.")
+    else:
+        # Compute correlation
+        corr_matrix = returns.corr()
+
+        # Name the index/columns to avoid collisions and reshape safely
+        corr_matrix.index.name = "Ticker1"
+        corr_matrix.columns.name = "Ticker2"
+
+        # Melt into tidy long form (no duplicate 'Ticker' columns)
+        corr_df = corr_matrix.reset_index().melt(
+            id_vars="Ticker1",
+            var_name="Ticker2",
+            value_name="Correlation",
+        )
+
+        # Build heatmap
+        heatmap = (
+            alt.Chart(corr_df)
+            .mark_rect()
+            .encode(
+                x=alt.X("Ticker1:N", sort=None, title=None),
+                y=alt.Y("Ticker2:N", sort=None, title=None),
+                color=alt.Color("Correlation:Q",
+                                scale=alt.Scale(scheme="redgrey", domain=[-1, 1])),
+                tooltip=[
+                    alt.Tooltip("Ticker1:N", title="Asset A"),
+                    alt.Tooltip("Ticker2:N", title="Asset B"),
+                    alt.Tooltip("Correlation:Q", format=".2f"),
+                ],
+            )
+            .properties(width=500, height=500, title="Correlation heatmap")
+        )
+
+        # Optional: overlay labels for exact values
+        labels = (
+            alt.Chart(corr_df)
+            .mark_text(baseline="middle", align="center", fontSize=13)
+            .encode(
+                x="Ticker1:N",
+                y="Ticker2:N",
+                text=alt.Text("Correlation:Q", format=".2f"),
+                color=alt.condition(
+                    "datum.Correlation > 0.7 || datum.Correlation < -0.7",
+                    alt.value("white"),  # white text on dark blocks
+                    alt.value("black")   # black text on light blocks
+                )
+            )
+        )
+
+
+        st.altair_chart(heatmap + labels, use_container_width=True)
+
+
+
     st.subheader("🔄 Rolling Risk (Volatility & Sharpe)")
     st.caption("Rolling metrics show **how risk and performance change over time**, instead of one static value.")
     st.sidebar.subheader("🔍 Rolling Window Settings")
@@ -295,48 +359,63 @@ with tab_benchmark:
     )["Close"]
 
     # Benchmark cumulative for charting
+    # 1. Calculate Daily Returns
     benchmark_returns = benchmark.pct_change().dropna()
-    benchmark_cumulative = (1 + benchmark_returns).cumprod()
 
-    # Align portfolio and benchmark to common overlap
-    combined = pd.concat([cumulative, benchmark_cumulative], axis=1).dropna()
+    # 2. Align Daily Returns FIRST (This is the fix: Resets both to start line)
+    # portfolio_return comes from the Overview tab
+    aligned_df = pd.concat([portfolio_return, benchmark_returns], axis=1).dropna()
+    aligned_df.columns = ["Portfolio", benchmark_label]
 
-    portfolio_total = combined.iloc[-1, 0] - 1
-    benchmark_total = combined.iloc[-1, 1] - 1
+    # 3. Calculate Cumulative Growth on aligned data (Now both start at 1.0)
+    aligned_cumulative = (1 + aligned_df).cumprod()
+
+    # 4. Calculate Totals & Alpha
+    portfolio_total = aligned_cumulative.iloc[-1]["Portfolio"] - 1
+    benchmark_total = aligned_cumulative.iloc[-1][benchmark_label] - 1
     alpha = (portfolio_total - benchmark_total) * 100
     color = "green" if alpha >= 0 else "red"
 
-    # Prepare DataFrames for chart
-    portfolio_df = cumulative.to_frame(name="Portfolio") if not isinstance(cumulative, pd.DataFrame) else cumulative.rename(columns={cumulative.columns[0]: "Portfolio"})
-    benchmark_df = benchmark_cumulative.to_frame(name=benchmark_label) if not isinstance(benchmark_cumulative, pd.DataFrame) else benchmark_cumulative.rename(columns={benchmark_cumulative.columns[0]: benchmark_label})
-
-    compare_df = (
-        pd.concat([portfolio_df, benchmark_df], axis=1)
-        .dropna()
-        .reset_index()
+    # --- 2. Prepare Data for Chart ---
+    # We use the aligned_cumulative df we created earlier, which ensures
+    # both lines start at the exact same point (1.0) on the chart.
+    compare_df = aligned_cumulative.reset_index().melt(
+        id_vars="Date", 
+        var_name="variable", 
+        value_name="value"
     )
 
+    # --- 3. Plot Chart ---
+    # Note: We removed 'transform_fold' because we already melted the data above
     chart_compare = (
         alt.Chart(compare_df)
         .mark_line()
         .encode(
             x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', labelAngle=0)),
-            y=alt.Y("value:Q", title="Growth Index"),
+            y=alt.Y("value:Q", title="Growth Index (Start = 1.0)"),
             color=alt.Color("variable:N", legend=alt.Legend(title=None))
         )
-        .transform_fold(["Portfolio", benchmark_label], as_=["variable", "value"])
-        .properties(height=420, width=1000, title="Portfolio vs Benchmark Performance")
+        .properties(height=420, width=1000, title="Portfolio vs Benchmark")
     )
     st.altair_chart(chart_compare, use_container_width=False)
+
+    # Extract dates for the label
+    start_str = aligned_cumulative.index[0].strftime('%d %b %Y')
+    end_str   = aligned_cumulative.index[-1].strftime('%d %b %Y')
 
     st.markdown(
         f"""
         <h4>📈 Alpha vs {benchmark_label}: 
         <span style='color:{color}'>{alpha:.2f}%</span>
         </h4>
+        <p style='font-size: 14px; color: #888; margin-top: -10px; font-weight: 400;'>
+            from {start_str} to {end_str}
+        </p>
         """,
         unsafe_allow_html=True
     )
+
+
 
 # ============================================
 # MONTE CARLO TAB
@@ -446,6 +525,16 @@ with tab_monte:
 # ============================================
 # OPTIMIZER TAB
 # ============================================
+
+st.sidebar.subheader("Optimizer Settings")
+lower_limit = st.sidebar.number_input(
+            "Min weight per asset (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=5.0,
+            step = 1.0,
+            )
+
 with tab_optimizer:
     from scipy.optimize import minimize
 
@@ -462,11 +551,12 @@ with tab_optimizer:
         vol = portfolio_volatility_opt(weights, cov_matrix)
         return -((ret - risk_free) / vol)
 
+
     def max_sharpe_portfolio(mean_returns, cov_matrix, risk_free):
         num_assets = len(mean_returns)
         init_weights = np.array(num_assets * [1.0 / num_assets])
         constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
-        bounds = tuple((0, 1) for _ in range(num_assets))
+        bounds = tuple((lower_limit / 100, 1) for _ in range(num_assets))
 
         result = minimize(
             neg_sharpe,
@@ -489,16 +579,73 @@ with tab_optimizer:
     mean_returns = returns.mean() * 252
     cov_matrix   = returns.cov() * 252
 
-    if st.button("🚀 Optimize (Max Sharpe)"):
-        opt_weights_calc, ret, vol, sharpe = get_max_sharpe_portfolio(
-            mean_returns, cov_matrix, risk_free
+
+    # Volatility Minimizer
+    def min_volatility_portfolio(mean_returns, cov_matrix):
+        num_assets = len(mean_returns)
+        init_weights = np.array(num_assets * [1.0 / num_assets])
+        constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
+        bounds = tuple((lower_limit / 100, 1) for _ in range(num_assets))
+
+        # Note: We directly minimize 'portfolio_volatility_opt'
+        result = minimize(
+            portfolio_volatility_opt,
+            init_weights,
+            args=(cov_matrix,),
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
         )
+        return result
+
+    # 🟢 NEW: Wrapper to get stats
+    def get_min_volatility_portfolio(mean_returns, cov_matrix, risk_free):
+        result = min_volatility_portfolio(mean_returns, cov_matrix)
+        opt_weights = result.x
+        
+        # Calculate stats for the new weights
+        ret = portfolio_return_opt(opt_weights, mean_returns)
+        vol = portfolio_volatility_opt(opt_weights, cov_matrix)
+        sharpe = (ret - risk_free) / vol if vol != 0 else 0
+        
+        return opt_weights, ret, vol, sharpe
+
+# --- 3. Strategy Selection Buttons (Side-by-Side) ---
+    # 1. Select Strategy
+    goal = st.radio(
+        "Optimization Goal:",
+        ["🚀 Max Sharpe (Growth)", "🛡️ Min Volatility (Safety)"],
+        horizontal=True
+    )
+
+    # 2. Single Run Button
+    if st.button("Run Optimization", type="primary"):
+        if "Max Sharpe" in goal:
+            # Run Max Sharpe
+            opt_weights_calc, ret, vol, sharpe = get_max_sharpe_portfolio(
+                mean_returns, cov_matrix, risk_free
+            )
+        else:
+            # Run Min Volatility (Make sure this function is in optimizer.py)
+            opt_weights_calc, ret, vol, sharpe = get_min_volatility_portfolio(
+                mean_returns, cov_matrix, risk_free
+            )
+        
+        # Save results to session state
         st.session_state["opt_weights"] = opt_weights_calc
         st.session_state["opt_stats"] = (ret, vol, sharpe)
 
-    if "opt_weights" in st.session_state and "opt_stats" in st.session_state:
-        opt_weights_display = st.session_state["opt_weights"]
-        ret, vol, sharpe = st.session_state["opt_stats"]
+        if "opt_weights" in st.session_state and "opt_stats" in st.session_state:
+            # Convert to NumPy array so .shape works
+            opt_weights_display = np.array(st.session_state["opt_weights"])
+            ret, vol, sharpe = st.session_state["opt_stats"]
+
+        if opt_weights_display.shape[0] != mean_returns.shape[0]:
+            st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
+            opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
+            st.session_state["opt_weights"] = opt_weights_display
+
+
 
         def portfolio_stats(weights, mean_returns, cov_matrix, risk_free):
             port_return = np.dot(weights, mean_returns)
@@ -620,6 +767,11 @@ if st.sidebar.button("💾 Save Portfolio Snapshot"):
 
 
 
+# ============================================
+# FOOTER & DISCLAIMER
+# ============================================
+
+# 1. The "Harbhajan The Great" Footer (Fixed Bottom Right)
 st.markdown(
     """
     <style>
@@ -634,14 +786,90 @@ st.markdown(
         border: 1.5px solid #b00020;
         padding: 5px 10px;
         border-radius: 999px;
-        background: transparent;
+        background: rgba(0,0,0,0.2);
         backdrop-filter: blur(2px);
-        box-shadow: 0 2px 6px rgba(0,0,0,.06);
         z-index: 1000;
+        pointer-events: none; /* Let clicks pass through if needed */
     }
     </style>
-    <div class="footer">
-        Harbhajan The Great
+    <div class="footer">Harbhajan The Great</div>
+    """,
+    unsafe_allow_html=True
+)
+
+# 2. The Disclaimer Button (Fixed Below Footer)
+# We use HTML <details> so it toggles instantly without re-running Python
+st.markdown(
+    """
+    <style>
+    /* Container aligns the button with the footer */
+    .disclaimer-container {
+        position: fixed;
+        bottom: 25px;
+        right: 15px;
+        z-index: 1001;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+    }
+    
+    /* The Button styling */
+    .disclaimer-btn {
+        background-color: #b00020;
+        color: white;
+        border: none;
+        padding: 5px 12px;
+        border-radius: 15px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        list-style: none; /* Hides default arrow */
+        transition: background 0.2s;
+    }
+    .disclaimer-btn:hover {
+        background-color: #d9002a;
+    }
+    /* Hide default marker in Chrome/Safari */
+    .disclaimer-btn::-webkit-details-marker {
+        display: none;
+    }
+
+    /* The Popup Box styling */
+    .disclaimer-content {
+        position: absolute;
+        bottom: 35px; /* Pops up above the button */
+        right: 0;
+        width: 280px;
+        background-color: #1a1a1a;
+        color: #cccccc;
+        padding: 12px;
+        border: 1px solid #333;
+        border-left: 3px solid #b00020;
+        border-radius: 8px;
+        font-size: 11px;
+        line-height: 1.4;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        animation: fadeIn 0.2s ease-out;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    </style>
+
+    <div class="disclaimer-container">
+        <details>
+            <summary class="disclaimer-btn">⚠️ Disclaimer</summary>
+            <div class="disclaimer-content">
+                <strong>Legal Notice:</strong><br>
+                This dashboard is for educational purposes only. 
+                It does not constitute investment advice. 
+                Market data may be delayed or inaccurate. 
+                Users are solely responsible for financial decisions made using this tool.
+            </div>
+        </details>
     </div>
     """,
     unsafe_allow_html=True
