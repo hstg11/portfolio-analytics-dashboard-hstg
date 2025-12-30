@@ -631,69 +631,69 @@ with tab_optimizer:
                 mean_returns, cov_matrix, risk_free
             )
         
-        # Save results to session state
-        st.session_state["opt_weights"] = opt_weights_calc
-        st.session_state["opt_stats"] = (ret, vol, sharpe)
+    # Save results to session state
+    st.session_state["opt_weights"] = opt_weights_calc
+    st.session_state["opt_stats"] = (ret, vol, sharpe)
 
-        if "opt_weights" in st.session_state and "opt_stats" in st.session_state:
-            # Convert to NumPy array so .shape works
-            opt_weights_display = np.array(st.session_state["opt_weights"])
-            ret, vol, sharpe = st.session_state["opt_stats"]
+    if "opt_weights" in st.session_state and "opt_stats" in st.session_state:
+        # Convert to NumPy array so .shape works
+        opt_weights_display = np.array(st.session_state["opt_weights"])
+        ret, vol, sharpe = st.session_state["opt_stats"]
 
-        if opt_weights_display.shape[0] != mean_returns.shape[0]:
-            st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
-            opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
-            st.session_state["opt_weights"] = opt_weights_display
+    if opt_weights_display.shape[0] != mean_returns.shape[0]:
+        st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
+        opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
+        st.session_state["opt_weights"] = opt_weights_display
 
 
 
-        def portfolio_stats(weights, mean_returns, cov_matrix, risk_free):
-            port_return = np.dot(weights, mean_returns)
-            port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-            sharpe = (port_return - risk_free) / port_vol if port_vol != 0 else 0
-            return port_return, port_vol, sharpe
+    def portfolio_stats(weights, mean_returns, cov_matrix, risk_free):
+        port_return = np.dot(weights, mean_returns)
+        port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        sharpe = (port_return - risk_free) / port_vol if port_vol != 0 else 0
+        return port_return, port_vol, sharpe
 
-        manual_weights_for_compare = []
-        for t in tickers_list:
-            w = st.session_state.get(f"number_input_{t}", round(100 / len(tickers_list), 2))
-            manual_weights_for_compare.append(w / 100)
+    manual_weights_for_compare = []
+    for t in tickers_list:
+        w = st.session_state.get(f"number_input_{t}", round(100 / len(tickers_list), 2))
+        manual_weights_for_compare.append(w / 100)
 
-        if opt_weights_display.shape[0] != mean_returns.shape[0]:
-            st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
-            opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
-            st.session_state["opt_weights"] = opt_weights_display
+    if opt_weights_display.shape[0] != mean_returns.shape[0]:
+        st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
+        opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
+        st.session_state["opt_weights"] = opt_weights_display
 
-        opt_ret, opt_vol, opt_sharpe = portfolio_stats(
-            opt_weights_display, mean_returns, cov_matrix, risk_free
-        )
-        
-        manual_ret, manual_vol, manual_sharpe = portfolio_stats(
-            np.array(manual_weights_for_compare), mean_returns, cov_matrix, risk_free
-        )
+    opt_ret, opt_vol, opt_sharpe = portfolio_stats(
+        opt_weights_display, mean_returns, cov_matrix, risk_free
+    )
+    
+    manual_ret, manual_vol, manual_sharpe = portfolio_stats(
+        np.array(manual_weights_for_compare), mean_returns, cov_matrix, risk_free
+    )
 
-        st.subheader("📊 Manual vs Optimized Portfolio (Annualized)")
-        compare_df = pd.DataFrame({
-            "Metric": ["Expected Return", "Volatility (Risk)", "Sharpe Ratio"],
-            "Manual": [f"{manual_ret*100:.2f}%", f"{manual_vol*100:.2f}%", f"{manual_sharpe:.2f}"],
-            "Optimized": [f"{opt_ret*100:.2f}%", f"{opt_vol*100:.2f}%", f"{opt_sharpe:.2f}"]
-        }, index=[1, 2, 3])
-        st.table(compare_df)
+    st.subheader("📊 Manual vs Optimized Portfolio (Annualized)")
+    compare_df = pd.DataFrame({
+        "Metric": ["Expected Return", "Volatility (Risk)", "Sharpe Ratio"],
+        "Manual": [f"{manual_ret*100:.2f}%", f"{manual_vol*100:.2f}%", f"{manual_sharpe:.2f}"],
+        "Optimized": [f"{opt_ret*100:.2f}%", f"{opt_vol*100:.2f}%", f"{opt_sharpe:.2f}"]
+    }, index=[1, 2, 3])
+    st.table(compare_df)
 
-        st.subheader("Optimized Portfolio Weights")
-        opt_df = pd.DataFrame({
-            "S.No": np.arange(1, len(mean_returns) + 1),
-            "Asset": mean_returns.index,
-            "Weight %": (opt_weights_display * 100).round(2)
-        })
-        total_row = pd.DataFrame([["TOTAL", "—", opt_df["Weight %"].sum().round(2)]],
-                                 columns=["S.No", "Asset", "Weight %"])
-        opt_df = pd.concat([opt_df, total_row], ignore_index=True)
-        st.dataframe(opt_df, hide_index=True)
+    st.subheader("Optimized Portfolio Weights")
+    opt_df = pd.DataFrame({
+        "S.No": np.arange(1, len(mean_returns) + 1),
+        "Asset": mean_returns.index,
+        "Weight %": (opt_weights_display * 100).round(2)
+    })
+    total_row = pd.DataFrame([["TOTAL", "—", opt_df["Weight %"].sum().round(2)]],
+                                columns=["S.No", "Asset", "Weight %"])
+    opt_df = pd.concat([opt_df, total_row], ignore_index=True)
+    st.dataframe(opt_df, hide_index=True)
 
-        if st.button("✅ Apply These Weights", type="primary"):
-            st.session_state["use_optimized"] = True
-            st.success("✅ Optimized weights applied!")
-            st.rerun()
+    if st.button("✅ Apply These Weights", type="primary"):
+        st.session_state["use_optimized"] = True
+        st.success("✅ Optimized weights applied!")
+        st.rerun()
 
 # ============================================
 # SIDEBAR: SAVE/LOAD PORTFOLIOS
@@ -768,16 +768,16 @@ if st.sidebar.button("💾 Save Portfolio Snapshot"):
 
 
 # ============================================
-# FOOTER & DISCLAIMER
+# FOOTER & DISCLAIMER (Shifted Up)
 # ============================================
 
-# 1. The "Harbhajan The Great" Footer (Fixed Bottom Right)
+# 1. The "Harbhajan The Great" Footer (Fixed Higher)
 st.markdown(
     """
     <style>
     .footer {
         position: fixed;
-        bottom: 70px;
+        bottom: 120px;  /* ⬆️ Increased from 70px */
         right: 15px;
         font-size: 13px;
         font-weight: 600;
@@ -789,7 +789,7 @@ st.markdown(
         background: rgba(0,0,0,0.2);
         backdrop-filter: blur(2px);
         z-index: 1000;
-        pointer-events: none; /* Let clicks pass through if needed */
+        pointer-events: none;
     }
     </style>
     <div class="footer">Harbhajan The Great</div>
@@ -797,23 +797,20 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 2. The Disclaimer Button (Fixed Below Footer)
-# We use HTML <details> so it toggles instantly without re-running Python
+# 2. The Disclaimer Button (Shifted Higher)
 st.markdown(
     """
     <style>
-    /* Container aligns the button with the footer */
     .disclaimer-container {
         position: fixed;
-        bottom: 25px;
+        bottom: 75px;  /* ⬆️ Increased from 25px */
         right: 15px;
         z-index: 1001;
         display: flex;
         flex-direction: column;
         align-items: flex-end;
     }
-    
-    /* The Button styling */
+
     .disclaimer-btn {
         background-color: #b00020;
         color: white;
@@ -824,21 +821,19 @@ st.markdown(
         font-weight: 600;
         cursor: pointer;
         box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        list-style: none; /* Hides default arrow */
+        list-style: none;
         transition: background 0.2s;
     }
     .disclaimer-btn:hover {
         background-color: #d9002a;
     }
-    /* Hide default marker in Chrome/Safari */
     .disclaimer-btn::-webkit-details-marker {
         display: none;
     }
 
-    /* The Popup Box styling */
     .disclaimer-content {
         position: absolute;
-        bottom: 35px; /* Pops up above the button */
+        bottom: 45px;  /* ⬆️ Increased from 35px */
         right: 0;
         width: 280px;
         background-color: #1a1a1a;
@@ -852,7 +847,7 @@ st.markdown(
         box-shadow: 0 5px 15px rgba(0,0,0,0.5);
         animation: fadeIn 0.2s ease-out;
     }
-    
+
     @keyframes fadeIn {
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
