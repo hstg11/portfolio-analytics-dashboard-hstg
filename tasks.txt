@@ -3,14 +3,15 @@
 3. Stock Corelation matrix ✅
 4. Min Volatility (30 min) ✅
 
-5. Manual vs Optimized Charts (2 hours) 
-6. Efficient Frontier (4 hours) 
-
-7. Educational Tooltips (2 hours) 
-
-8. Mahi for color scheme
 
 
+7. Efficient Frontier (4 hours) 
+
+8. Educational Tooltips (2 hours) 
+
+9. Mahi for color scheme
+
+10. allow user to rename / delete saved portfolios
 
 Notes:
 🏔️ The Efficient Frontier: The "Hedge Fund" scatter plot.

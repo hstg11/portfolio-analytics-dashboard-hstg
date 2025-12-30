@@ -186,36 +186,27 @@ if returns.shape[1] != len(weights):
 portfolio_return = returns.dot(weights)
 cumulative = (1 + portfolio_return).cumprod()
 
+
 # ============================================
 # RISK TAB
 # ============================================
 with tab_risk:
     st.header("📉 Portfolio Risk Metrics")
-    trading_days = 252
 
-    mu_annual = portfolio_return.mean() * trading_days
-    sigma_annual = portfolio_return.std() * np.sqrt(trading_days)
-    sharpe = (mu_annual - risk_free) / sigma_annual
-    volatility = sigma_annual * 100
-
-    rolling_max = cumulative.cummax()
-    drawdown = (cumulative - rolling_max) / rolling_max
-    max_drawdown = drawdown.min() * 100
-
-    var_95 = portfolio_return.quantile(0.05) * 100
+    # Use helper from portfolio.py
+    metrics = risk_metrics(portfolio_return, cumulative, risk_free)
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Volatility (Annualized)", f"{volatility:.2f}%")
+    col1.metric("Volatility (Annualized)", f"{metrics['volatility_pct']:.2f}%")
     col1.caption("Measures how **choppy** returns are. Higher = riskier.")
-    col2.metric("Sharpe Ratio", f"{sharpe:.2f}")
+    col2.metric("Sharpe Ratio", f"{metrics['sharpe']:.2f}")
     col2.caption("Return earned **per unit of risk**. >1 is generally strong.")
-    col3.metric("Max Drawdown", f"{max_drawdown:.2f}%")
+    col3.metric("Max Drawdown", f"{metrics['max_drawdown_pct']:.2f}%")
     col3.caption("Worst peak-to-trough fall – shows **pain during crashes**.")
-    col4.metric("VaR (95%)", f"{var_95:.2f}%")
+    col4.metric("VaR (95%)", f"{metrics['var_95_pct']:.2f}%")
     col4.caption("On a bad day, you may lose **about this much or worse** (5% chance).")
 
-    
-    # --- Correlation Matrix Heatmap ---
+    # --- Correlation Matrix Heatmap (unchanged) ---
     st.subheader("📊 Correlation matrix of assets")
     st.caption("Lower correlation improves diversification and can reduce portfolio volatility.")
 
@@ -229,7 +220,7 @@ with tab_risk:
         corr_matrix.index.name = "Ticker1"
         corr_matrix.columns.name = "Ticker2"
 
-        # Melt into tidy long form (no duplicate 'Ticker' columns)
+        # Melt into tidy long form
         corr_df = corr_matrix.reset_index().melt(
             id_vars="Ticker1",
             var_name="Ticker2",
@@ -241,7 +232,7 @@ with tab_risk:
             alt.Chart(corr_df)
             .mark_rect()
             .encode(
-                x=alt.X("Ticker1:N", sort=None, title=None),
+                x=alt.X("Ticker1:N", sort=None, title=None, axis=alt.Axis(labelAngle=0)),
                 y=alt.Y("Ticker2:N", sort=None, title=None),
                 color=alt.Color("Correlation:Q",
                                 scale=alt.Scale(scheme="redgrey", domain=[-1, 1])),
@@ -254,7 +245,7 @@ with tab_risk:
             .properties(width=500, height=500, title="Correlation heatmap")
         )
 
-        # Optional: overlay labels for exact values
+        # Overlay labels
         labels = (
             alt.Chart(corr_df)
             .mark_text(baseline="middle", align="center", fontSize=13)
@@ -264,21 +255,19 @@ with tab_risk:
                 text=alt.Text("Correlation:Q", format=".2f"),
                 color=alt.condition(
                     "datum.Correlation > 0.7 || datum.Correlation < -0.7",
-                    alt.value("white"),  # white text on dark blocks
-                    alt.value("black")   # black text on light blocks
+                    alt.value("white"),
+                    alt.value("black")
                 )
             )
         )
 
-
         st.altair_chart(heatmap + labels, use_container_width=True)
 
-
-
+    
     st.subheader("🔄 Rolling Risk (Volatility & Sharpe)")
-    st.caption("Rolling metrics show **how risk and performance change over time**, instead of one static value.")
-    st.sidebar.subheader("🔍 Rolling Window Settings")
+    st.caption("Rolling metrics show **how risk and performance change over time**.")
 
+    st.sidebar.subheader("🔍 Rolling Window Settings")
     window = st.sidebar.slider(
         "Rolling window (trading days)",
         min_value=20,
@@ -287,37 +276,37 @@ with tab_risk:
         step=5
     )
 
-    rolling_std = portfolio_return.rolling(window).std() * np.sqrt(trading_days)
-    rolling_vol = rolling_std * 100
+    # Use helper from portfolio.py
+    rolling_vol, rolling_sharpe = rolling_risk(portfolio_return, window, risk_free)
 
-    rolling_mean = portfolio_return.rolling(window).mean() * trading_days
-    rolling_sharpe = (rolling_mean - risk_free) / rolling_std
-
+    # Plot rolling volatility
     vol_df = rolling_vol.reset_index()
     vol_df.columns = ["Date", "Rolling Volatility (%)"]
     chart_vol = (
         alt.Chart(vol_df)
         .mark_line(color="#e63946")
         .encode(
-            x=alt.X("Date:T", axis=alt.Axis(format="%b %Y", labelAngle=0)),
+            x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', labelAngle=0)),
             y="Rolling Volatility (%):Q"
         )
         .properties(title="Rolling Annualized Volatility", height=320, width=950)
     )
     st.altair_chart(chart_vol, use_container_width=False)
 
+    # Plot rolling Sharpe
     sharpe_df = rolling_sharpe.reset_index()
     sharpe_df.columns = ["Date", "Rolling Sharpe"]
     chart_sharpe = (
         alt.Chart(sharpe_df)
         .mark_line(color="#1d3557")
         .encode(
-            x=alt.X("Date:T", axis=alt.Axis(format="%b %Y", labelAngle=0)),
+            x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', labelAngle=0)),
             y="Rolling Sharpe:Q"
         )
         .properties(title="Rolling Sharpe Ratio", height=320, width=950)
     )
     st.altair_chart(chart_sharpe, use_container_width=False)
+
 
     with st.expander("🔍 What does Rolling Volatility & Sharpe mean?"):
         st.markdown("""
@@ -348,24 +337,16 @@ with tab_benchmark:
         "^BSESN": "Sensex"
     }
     benchmark_label = benchmark_names.get(benchmark_symbol, "Benchmark")
+    # Use helper from portfolio.py instead of inline download
+    benchmark_returns, bench_cum = benchmark_series(benchmark_symbol, start_date, end_date)
 
-    # Use the user-selected start_date for benchmark
-    benchmark = yf.download(
-        benchmark_symbol,
-        start=start_date,
-        end=end_date,
-        auto_adjust=True,
-        progress=False
-    )["Close"]
-
-    # Benchmark cumulative for charting
-    # 1. Calculate Daily Returns
-    benchmark_returns = benchmark.pct_change().dropna()
-
-    # 2. Align Daily Returns FIRST (This is the fix: Resets both to start line)
-    # portfolio_return comes from the Overview tab
+    # Align Daily Returns FIRST (resets both to start line)
     aligned_df = pd.concat([portfolio_return, benchmark_returns], axis=1).dropna()
     aligned_df.columns = ["Portfolio", benchmark_label]
+
+    # Calculate Cumulative Growth on aligned data (both start at 1.0)
+    aligned_cumulative = (1 + aligned_df).cumprod()
+
 
     # 3. Calculate Cumulative Growth on aligned data (Now both start at 1.0)
     aligned_cumulative = (1 + aligned_df).cumprod()
@@ -420,6 +401,9 @@ with tab_benchmark:
 # ============================================
 # MONTE CARLO TAB
 # ============================================
+# ============================================
+# MONTE CARLO TAB
+# ============================================
 with tab_monte:
     st.header("🎲 Monte Carlo Simulation")
     st.write("""
@@ -442,16 +426,7 @@ with tab_monte:
         min_value=100, max_value=3000, value=200, step=100
     )
 
-    @st.cache_data(show_spinner=False)
-    def run_simulation(mu, sigma, num_days, num_sims):
-        start_value = 1
-        sim_results = np.zeros((num_days, num_sims))
-        for s in range(num_sims):
-            daily_random_returns = np.random.normal(mu, sigma, num_days)
-            sim_path = start_value * np.cumprod(1 + daily_random_returns)
-            sim_results[:, s] = sim_path
-        return sim_results
-
+    # ✅ Use portfolio.py helper instead of local function
     sim_results = run_simulation(mu, sigma, num_days, num_sims)
 
     st.subheader("Simulated Future Portfolio Paths")
@@ -469,6 +444,7 @@ with tab_monte:
         "P5": p5, "P50": p50, "P95": p95
     })
 
+    # Charts (unchanged)
     lower_line = alt.Chart(percentile_df).mark_line(color="#d61f1f").encode(
         x="Day:Q", y=alt.Y("P5:Q", axis=alt.Axis(title="Portfolio Value (x)"))
     )
@@ -485,7 +461,7 @@ with tab_monte:
     final_chart = lower_line + upper_line + chart_mc + median_line
     st.altair_chart(final_chart, use_container_width=False)
 
-    st.subheader("Monte Carlo Summary (End of Period)")
+    # Summary (unchanged)
     final_values = sim_results[-1, :]
     p5  = np.percentile(final_values, 5)
     p50 = np.percentile(final_values, 50)
@@ -525,175 +501,133 @@ with tab_monte:
 # ============================================
 # OPTIMIZER TAB
 # ============================================
-
 st.sidebar.subheader("Optimizer Settings")
 lower_limit = st.sidebar.number_input(
-            "Min weight per asset (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=5.0,
-            step = 1.0,
-            )
+    "Min weight per asset (%)",
+    min_value=0.0,
+    max_value=100.0,
+    value=5.0,
+    step=1.0,
+)
 
 with tab_optimizer:
-    from scipy.optimize import minimize
+    st.header("🔧 Portfolio Optimizer")
 
-    st.header("🔧 Portfolio Optimizer – Max Sharpe")
-
-    def portfolio_return_opt(weights, mean_returns):
-        return np.dot(weights, mean_returns)
-
-    def portfolio_volatility_opt(weights, cov_matrix):
-        return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-
-    def neg_sharpe(weights, mean_returns, cov_matrix, risk_free):
-        ret = portfolio_return_opt(weights, mean_returns)
-        vol = portfolio_volatility_opt(weights, cov_matrix)
-        return -((ret - risk_free) / vol)
-
-
-    def max_sharpe_portfolio(mean_returns, cov_matrix, risk_free):
-        num_assets = len(mean_returns)
-        init_weights = np.array(num_assets * [1.0 / num_assets])
-        constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
-        bounds = tuple((lower_limit / 100, 1) for _ in range(num_assets))
-
-        result = minimize(
-            neg_sharpe,
-            init_weights,
-            args=(mean_returns, cov_matrix, risk_free),
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints,
-        )
-        return result
-
-    def get_max_sharpe_portfolio(mean_returns, cov_matrix, risk_free):
-        result = max_sharpe_portfolio(mean_returns, cov_matrix, risk_free)
-        opt_weights = result.x
-        ret = portfolio_return_opt(opt_weights, mean_returns)
-        vol = portfolio_volatility_opt(opt_weights, cov_matrix)
-        sharpe = (ret - risk_free) / vol
-        return opt_weights, ret, vol, sharpe
-
+    # --- 1. Calculations ---
     mean_returns = returns.mean() * 252
-    cov_matrix   = returns.cov() * 252
+    cov_matrix = returns.cov() * 252
 
-
-    # Volatility Minimizer
-    def min_volatility_portfolio(mean_returns, cov_matrix):
-        num_assets = len(mean_returns)
-        init_weights = np.array(num_assets * [1.0 / num_assets])
-        constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
-        bounds = tuple((lower_limit / 100, 1) for _ in range(num_assets))
-
-        # Note: We directly minimize 'portfolio_volatility_opt'
-        result = minimize(
-            portfolio_volatility_opt,
-            init_weights,
-            args=(cov_matrix,),
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints,
-        )
-        return result
-
-    # 🟢 NEW: Wrapper to get stats
-    def get_min_volatility_portfolio(mean_returns, cov_matrix, risk_free):
-        result = min_volatility_portfolio(mean_returns, cov_matrix)
-        opt_weights = result.x
-        
-        # Calculate stats for the new weights
-        ret = portfolio_return_opt(opt_weights, mean_returns)
-        vol = portfolio_volatility_opt(opt_weights, cov_matrix)
-        sharpe = (ret - risk_free) / vol if vol != 0 else 0
-        
-        return opt_weights, ret, vol, sharpe
-
-# --- 3. Strategy Selection Buttons (Side-by-Side) ---
-    # 1. Select Strategy
+    # --- 2. Strategy Selection ---
     goal = st.radio(
         "Optimization Goal:",
         ["🚀 Max Sharpe (Growth)", "🛡️ Min Volatility (Safety)"],
         horizontal=True
     )
 
-    # 2. Single Run Button
     if st.button("Run Optimization", type="primary"):
         if "Max Sharpe" in goal:
-            # Run Max Sharpe
             opt_weights_calc, ret, vol, sharpe = get_max_sharpe_portfolio(
-                mean_returns, cov_matrix, risk_free
+                mean_returns, cov_matrix, risk_free, lower_limit
             )
         else:
-            # Run Min Volatility (Make sure this function is in optimizer.py)
             opt_weights_calc, ret, vol, sharpe = get_min_volatility_portfolio(
-                mean_returns, cov_matrix, risk_free
+                mean_returns, cov_matrix, risk_free, lower_limit
             )
         
-    # Save results to session state
-    st.session_state["opt_weights"] = opt_weights_calc
-    st.session_state["opt_stats"] = (ret, vol, sharpe)
+        # Save results
+        st.session_state["opt_weights"] = opt_weights_calc
+        st.session_state["opt_stats"] = (ret, vol, sharpe)
+        st.rerun()
 
+    # --- 3. Display Results ---
     if "opt_weights" in st.session_state and "opt_stats" in st.session_state:
-        # Convert to NumPy array so .shape works
         opt_weights_display = np.array(st.session_state["opt_weights"])
         ret, vol, sharpe = st.session_state["opt_stats"]
 
-    if opt_weights_display.shape[0] != mean_returns.shape[0]:
-        st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
-        opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
-        st.session_state["opt_weights"] = opt_weights_display
+        # Safety Check: Ticker mismatch
+        if opt_weights_display.shape[0] != mean_returns.shape[0]:
+            st.warning("⚠️ Ticker list changed. Please click 'Run Optimization' again.")
+            opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
+            st.session_state["opt_weights"] = opt_weights_display
+        else:
+            # Manual weights for comparison
+            manual_weights_array = np.array(weights)
 
+            # Calculate stats using optimizer.py helper
+            opt_ret, opt_vol, opt_sharpe = portfolio_stats(
+                opt_weights_display, mean_returns, cov_matrix, risk_free
+            )
+            manual_ret, manual_vol, manual_sharpe = portfolio_stats(
+                manual_weights_array, mean_returns, cov_matrix, risk_free
+            )
 
+            # --- Comparison Table ---
+            st.subheader("📊 Manual vs Optimized Portfolio (Annualized)")
+            compare_df = pd.DataFrame({
+                "Metric": ["Expected Return", "Volatility (Risk)", "Sharpe Ratio"],
+                "Manual": [f"{manual_ret*100:.2f}%", f"{manual_vol*100:.2f}%", f"{manual_sharpe:.2f}"],
+                "Optimized": [f"{opt_ret*100:.2f}%", f"{opt_vol*100:.2f}%", f"{opt_sharpe:.2f}"]
+            }, index=[1, 2, 3])
+            st.table(compare_df)
 
-    def portfolio_stats(weights, mean_returns, cov_matrix, risk_free):
-        port_return = np.dot(weights, mean_returns)
-        port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        sharpe = (port_return - risk_free) / port_vol if port_vol != 0 else 0
-        return port_return, port_vol, sharpe
+            # --- Charts (unchanged) ---
+            # cumulative returns chart
+            manual_daily_ret = returns.dot(manual_weights_array)
+            opt_daily_ret = returns.dot(opt_weights_display)
+            manual_cum = (1 + manual_daily_ret).cumprod()
+            opt_cum = (1 + opt_daily_ret).cumprod()
+            perf_df = pd.DataFrame({
+                "Date": manual_cum.index,
+                "Manual Portfolio": manual_cum,
+                "Optimized Portfolio": opt_cum
+            }).melt("Date", var_name="Portfolio", value_name="Growth Index")
+            perf_chart = alt.Chart(perf_df).mark_line().encode(
+                x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', title=None)),
+                y=alt.Y("Growth Index:Q", scale=alt.Scale(zero=False)),
+                color=alt.Color("Portfolio:N", scale=alt.Scale(
+                    domain=['Manual Portfolio', 'Optimized Portfolio'], 
+                    range=['#cccccc', '#4ade80']
+                )),
+                tooltip=["Date:T", "Portfolio", alt.Tooltip("Growth Index", format=".2f")]
+            ).properties(height=350, width=800)
+            st.altair_chart(perf_chart, use_container_width=True)
+            st.caption("This chart shows **historical backtested performance** based on your chosen period. It is not a forecast.")
 
-    manual_weights_for_compare = []
-    for t in tickers_list:
-        w = st.session_state.get(f"number_input_{t}", round(100 / len(tickers_list), 2))
-        manual_weights_for_compare.append(w / 100)
+            # weight allocation chart
+            alloc_df = pd.DataFrame({
+                "Ticker": tickers_list,
+                "Manual": manual_weights_array * 100,
+                "Optimized": opt_weights_display * 100
+            }).melt("Ticker", var_name="Type", value_name="Weight (%)")
 
-    if opt_weights_display.shape[0] != mean_returns.shape[0]:
-        st.warning("Optimizer weights were from an older ticker list – Optimize Again!")
-        opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
-        st.session_state["opt_weights"] = opt_weights_display
+            alloc_chart = alt.Chart(alloc_df).mark_bar().encode(
+                x=alt.X("Ticker:N", title=None, sort=None, axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("Weight (%):Q"),
+                color=alt.Color("Type:N", scale=alt.Scale(
+                    domain=['Manual', 'Optimized'], 
+                    range=['#cccccc', '#4ade80']
+                )),
+                xOffset="Type:N",
+                tooltip=["Ticker", "Type", alt.Tooltip("Weight (%)", format=".1f")]
+            ).properties(height=350)
+            
+            st.altair_chart(alloc_chart, use_container_width=True)
 
-    opt_ret, opt_vol, opt_sharpe = portfolio_stats(
-        opt_weights_display, mean_returns, cov_matrix, risk_free
-    )
-    
-    manual_ret, manual_vol, manual_sharpe = portfolio_stats(
-        np.array(manual_weights_for_compare), mean_returns, cov_matrix, risk_free
-    )
+            # weights table
+            st.subheader("Optimized Portfolio Weights")
+            opt_df = pd.DataFrame({
+                "Asset": mean_returns.index,
+                "Weight %": (opt_weights_display * 100).round(2)
+            })
+            st.dataframe(opt_df, hide_index=True)
 
-    st.subheader("📊 Manual vs Optimized Portfolio (Annualized)")
-    compare_df = pd.DataFrame({
-        "Metric": ["Expected Return", "Volatility (Risk)", "Sharpe Ratio"],
-        "Manual": [f"{manual_ret*100:.2f}%", f"{manual_vol*100:.2f}%", f"{manual_sharpe:.2f}"],
-        "Optimized": [f"{opt_ret*100:.2f}%", f"{opt_vol*100:.2f}%", f"{opt_sharpe:.2f}"]
-    }, index=[1, 2, 3])
-    st.table(compare_df)
-
-    st.subheader("Optimized Portfolio Weights")
-    opt_df = pd.DataFrame({
-        "S.No": np.arange(1, len(mean_returns) + 1),
-        "Asset": mean_returns.index,
-        "Weight %": (opt_weights_display * 100).round(2)
-    })
-    total_row = pd.DataFrame([["TOTAL", "—", opt_df["Weight %"].sum().round(2)]],
-                                columns=["S.No", "Asset", "Weight %"])
-    opt_df = pd.concat([opt_df, total_row], ignore_index=True)
-    st.dataframe(opt_df, hide_index=True)
-
-    if st.button("✅ Apply These Weights", type="primary"):
-        st.session_state["use_optimized"] = True
-        st.success("✅ Optimized weights applied!")
-        st.rerun()
+            # apply button
+            if st.button("✅ Apply These Weights", type="primary"):
+                st.session_state["use_optimized"] = True
+                st.session_state["opt_weights"] = opt_weights_display.tolist() 
+                st.success("✅ Optimized weights applied!")
+                st.toast("✅ Optimized weights applied!", icon="✅")
+                st.rerun()
 
 # ============================================
 # SIDEBAR: SAVE/LOAD PORTFOLIOS
