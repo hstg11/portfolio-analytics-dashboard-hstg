@@ -1,3 +1,4 @@
+#app.py
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -56,7 +57,7 @@ if not st.session_state["signed_up"]:
 # MAIN DASHBOARD
 # ============================================
 st.title("📊 Portfolio Performance & Risk Dashboard")
-st.write("Analyze returns, risk, and benchmark performance in one place.")
+st.write("Analyze returns, risk, and benchmark performance at one place.")
 
 st.sidebar.header("Portfolio Inputs")
 
@@ -327,7 +328,7 @@ with tab_risk:
     sharpe_df.columns = ["Date", "Rolling Sharpe"]
     chart_sharpe = (
         alt.Chart(sharpe_df)
-        .mark_line(color="#1d3557")
+        .mark_line(color="#8e70e2")
         .encode(
             x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', labelAngle=0)),
             y="Rolling Sharpe:Q"
@@ -376,10 +377,6 @@ with tab_benchmark:
     # Calculate Cumulative Growth on aligned data (both start at 1.0)
     aligned_cumulative = (1 + aligned_df).cumprod()
 
-
-    # 3. Calculate Cumulative Growth on aligned data (Now both start at 1.0)
-    aligned_cumulative = (1 + aligned_df).cumprod()
-
     # 4. Calculate Totals & Alpha
     portfolio_total = aligned_cumulative.iloc[-1]["Portfolio"] - 1
     benchmark_total = aligned_cumulative.iloc[-1][benchmark_label] - 1
@@ -425,11 +422,6 @@ with tab_benchmark:
         unsafe_allow_html=True
     )
 
-
-
-# ============================================
-# MONTE CARLO TAB
-# ============================================
 # ============================================
 # MONTE CARLO TAB
 # ============================================
@@ -447,9 +439,10 @@ with tab_monte:
 
     st.subheader("Simulation Settings")
     num_days = st.slider(
-        "Number of days to simulate (trading days)",
+        "Number of trading days to simulate",
         min_value=60, max_value=756, value=252, step=10
     )
+
     num_sims = st.slider(
         "Number of simulations",
         min_value=100, max_value=3000, value=200, step=100
@@ -483,7 +476,7 @@ with tab_monte:
     median_line = alt.Chart(percentile_df).mark_line(color="orange", size=2).encode(
         x="Day:Q", y="P50:Q"
     )
-    chart_mc = alt.Chart(sim_melted).mark_line(opacity=0.1).encode(
+    chart_mc = alt.Chart(sim_melted).mark_line(opacity=0.2).encode(
         x="Day:Q", y="Value:Q"
     ).properties(height=420, width=900)
 
@@ -520,7 +513,7 @@ with tab_monte:
 
     st.write(f"""
     ➡ With 90% confidence, your portfolio may end between **{p5:.2f}x** and **{p95:.2f}x** 
-    over the next {num_days} days.
+    over the next {num_days} trading days.
     """)
     st.caption("""
     These estimates come from Monte Carlo simulations based on historical volatility 
@@ -744,7 +737,7 @@ st.markdown(
     <style>
     .footer {
         position: fixed;
-        bottom: 120px;  /* ⬆️ Increased from 70px */
+        bottom: 90px;  /* ⬆️ Increased from 70px */
         right: 15px;
         font-size: 13px;
         font-weight: 600;
@@ -765,12 +758,13 @@ st.markdown(
 )
 
 # 2. The Disclaimer Button (Shifted Higher)
+# 2. The Disclaimer Button (Shifted Higher)
 st.markdown(
     """
     <style>
     .disclaimer-container {
         position: fixed;
-        bottom: 75px;  /* ⬆️ Increased from 25px */
+        bottom: 50px;
         right: 15px;
         z-index: 1001;
         display: flex;
@@ -800,9 +794,9 @@ st.markdown(
 
     .disclaimer-content {
         position: absolute;
-        bottom: 45px;  /* ⬆️ Increased from 35px */
+        bottom: 45px;
         right: 0;
-        width: 280px;
+        width: 340px;
         background-color: #1a1a1a;
         color: #cccccc;
         padding: 12px;
@@ -813,25 +807,46 @@ st.markdown(
         line-height: 1.4;
         box-shadow: 0 5px 15px rgba(0,0,0,0.5);
         animation: fadeIn 0.2s ease-out;
+        text-align: left;
     }
 
     @keyframes fadeIn {
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
     }
+    
+    .disc-header {
+        font-weight: 700;
+        color: #fff;
+        border-bottom: 1px solid #444;
+        padding-bottom: 4px;
+        margin-bottom: 8px;
+        display: block;
+    }
     </style>
 
     <div class="disclaimer-container">
-        <details>
-            <summary class="disclaimer-btn">⚠️ Disclaimer</summary>
-            <div class="disclaimer-content">
-                <strong>Legal Notice:</strong><br>
-                This dashboard is for educational purposes only. 
-                It does not constitute investment advice. 
-                Market data may be delayed or inaccurate. 
-                Users are solely responsible for financial decisions made using this tool.
-            </div>
-        </details>
+    <details>
+    <summary class="disclaimer-btn">⚠️ Disclaimer & Methodology</summary>
+    <div class="disclaimer-content">
+    <span class="disc-header">DISCLAIMER & METHODOLOGY</span>
+    <strong>1. Methodology (Lump‑Sum Assumption)</strong><br>
+    This dashboard assumes your portfolio was <u>fully invested</u> starting from the selected Start Date.
+    It does <strong>not</strong> account for:
+    <ul style="margin: 4px 0 8px 15px; padding: 0; color: #b0b0b0;">
+    <li>Gradual investments (SIP/DCA)</li>
+    <li>Mid‑period rebalancing</li>
+    <li>Taxes, transaction fees, or dividends (unless using total return data)</li>
+    </ul>
+    <em>Implication: Metrics are an approximation of historical performance, not a precise reflection of your actual investment journey.</em>
+    <br><br>
+    <strong>2. Data & Accuracy</strong><br>
+    Market data is sourced from third‑party providers and may be delayed or contain errors. We do not guarantee the accuracy of this data.
+    <br><br>
+    <strong>3. Educational Use Only</strong><br>
+    All charts and metrics are for illustrative purposes only. They should not be interpreted as financial advice or guarantees of future outcomes.
+    </div>
+    </details>
     </div>
     """,
     unsafe_allow_html=True

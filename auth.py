@@ -1,3 +1,4 @@
+#auth.py
 """
 Authentication and user management module
 Handles login, signup, and user data storage with validation
@@ -238,14 +239,14 @@ def show_signup_gate(users_df, users_ws, cookies):
         with col1:
             name = st.text_input(
                 "Full Name *",
-                placeholder="e.g., John Doe",
+                placeholder="e.g., Tony Stark",
                 help="Your full name"
             )
         
         with col2:
             email = st.text_input(
                 "Email Address *",
-                placeholder="e.g., john@example.com",
+                placeholder="e.g., tony@starkindustries.com",
                 help="We'll use this to identify you"
             )
         
@@ -262,7 +263,7 @@ def show_signup_gate(users_df, users_ws, cookies):
         with col4:
             city = st.text_input(
                 "City *",
-                placeholder="e.g., Mumbai",
+                placeholder="e.g., New York",
                 help="Your current city"
             )
         
