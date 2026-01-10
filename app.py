@@ -155,9 +155,12 @@ else:
 # ============================================
 # DOWNLOAD DATA
 # ============================================
+# Fetch 1 extra day before to avoid losing Day 1 after pct_change
+adjusted_start = start_date - pd.Timedelta(days=1)
+
 raw = yf.download(
     tickers_list,
-    start=start_date,
+    start=adjusted_start,  # Start 1 day earlier
     end=end_date,
     auto_adjust=True,
     progress=False
@@ -187,6 +190,7 @@ with tab_overview:
         data = raw["Adj Close"]
 
     data = data.dropna()
+    data = data[data.index >= pd.to_datetime(start_date)]
 
     price_df = data.reset_index().melt('Date', var_name='Ticker', value_name='Price')
 
@@ -223,18 +227,58 @@ cumulative = (1 + portfolio_return).cumprod()
 with tab_risk:
     st.header("📉 Portfolio Risk Metrics")
 
-    # Use helper from portfolio.py
     metrics = risk_metrics(portfolio_return, cumulative, risk_free)
 
+    # --- Core Metrics ---
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Volatility (Annualized)", f"{metrics['volatility_pct']:.2f}%")
-    col1.caption("Measures how **choppy** returns are. Higher = riskier.")
+    col1.caption("📊 Measures how **choppy** returns are. Higher = riskier.")
+
     col2.metric("Sharpe Ratio", f"{metrics['sharpe']:.2f}")
-    col2.caption("Return earned **per unit of risk**. >1 is generally strong.")
+    col2.caption("⚖️ Return earned **per unit of risk**. >1 is strong.")
+
     col3.metric("Max Drawdown", f"{metrics['max_drawdown_pct']:.2f}%")
-    col3.caption("Worst peak-to-trough fall – shows **pain during crashes**.")
-    col4.metric("VaR (95%)", f"{metrics['var_95_pct']:.2f}%")
-    col4.caption("On a bad day, you may lose **about this much or worse** (5% chance).")
+    col3.caption("📉 Worst peak‑to‑trough fall – shows **pain during crashes**.")
+
+    col4.metric("Sortino Ratio", f"{metrics['sortino']:.2f}" if not np.isnan(metrics["sortino"]) else "—")
+    col4.caption("🎯 Risk‑adjusted return using **downside volatility only**.")
+
+    st.divider()
+
+    # --- Tail Risk Metrics ---
+    st.subheader("📉 Downside & Tail Risk Metrics")
+
+    row1_col1, row1_col2 = st.columns(2)
+    row1_col1.metric("VaR (95%)", f"{metrics['var_95_pct']:.2f}%")
+    row1_col1.caption("🛡️ Expected worst daily loss on **95% of days**.")
+
+    row1_col2.metric("CVaR (95%)", f"{metrics['cvar_95_pct']:.2f}%")
+    row1_col2.caption("🔥 Average loss **when VaR is breached** (tail risk).")
+
+    row2_col1, row2_col2 = st.columns(2)
+    row2_col1.metric("VaR (99%)", f"{metrics['var_99_pct']:.2f}%")
+    row2_col1.caption("⚠️ Extreme loss threshold (1% worst days).")
+
+    row2_col2.metric("CVaR (99%)", f"{metrics['cvar_99_pct']:.2f}%")
+    row2_col2.caption("💥 Expected loss during **extreme market stress**.")
+
+
+
+    with st.expander("ℹ️ What do Sortino Ratio, VaR & CVaR indicate?"):
+        st.markdown("""
+    **Sortino Ratio**  
+    Measures return per unit of **downside risk**, ignoring upside volatility.
+    Preferred over Sharpe when evaluating real-world portfolios.
+
+    **VaR (Value at Risk)**  
+    Estimates how much you might lose on a bad day, with a given confidence level.
+
+    **CVaR / TVaR (Conditional VaR)**  
+    Goes one step further — it measures how bad losses are **when VaR is exceeded**.
+    This is critical for understanding **tail risk**.
+        """)
+
+
 
     # --- Correlation Matrix Heatmap (unchanged) ---
     st.subheader("📊 Correlation matrix of assets")
@@ -368,7 +412,7 @@ with tab_benchmark:
     }
     benchmark_label = benchmark_names.get(benchmark_symbol, "Benchmark")
     # Use helper from portfolio.py instead of inline download
-    benchmark_returns, bench_cum = benchmark_series(benchmark_symbol, start_date, end_date)
+    benchmark_returns, bench_cum = benchmark_series(benchmark_symbol, adjusted_start, end_date)
 
     # Align Daily Returns FIRST (resets both to start line)
     aligned_df = pd.concat([portfolio_return, benchmark_returns], axis=1).dropna()
@@ -410,17 +454,26 @@ with tab_benchmark:
     start_str = aligned_cumulative.index[0].strftime('%d %b %Y')
     end_str   = aligned_cumulative.index[-1].strftime('%d %b %Y')
 
-    st.markdown(
-        f"""
-        <h4>📈 Alpha vs {benchmark_label}: 
-        <span style='color:{color}'>{alpha:.2f}%</span>
-        </h4>
-        <p style='font-size: 14px; color: #888; margin-top: -10px; font-weight: 400;'>
-            from {start_str} to {end_str}
-        </p>
-        """,
-        unsafe_allow_html=True
-    )
+    col_left, col_right = st.columns([3, 1])
+
+    with col_left:
+        st.markdown(
+            f"""
+            <h4>📈 Alpha vs {benchmark_label}: 
+            <span style='color:{color}'>{alpha:.2f}%</span>
+            </h4>
+            <p style='font-size: 14px; color: #888; margin-top: -10px; font-weight: 400;'>
+                from {start_str} to {end_str}
+            </p>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col_right:
+        beta = portfolio_beta(portfolio_return, benchmark_returns)
+        st.metric(label="📐 Beta", value=f"{beta:.2f}")
+
+
 
 # ============================================
 # MONTE CARLO TAB
@@ -658,17 +711,21 @@ with tab_optimizer:
 # ============================================
 # SIDEBAR: SAVE/LOAD PORTFOLIOS
 # ============================================
+# ============================================
+# SIDEBAR: SAVE/LOAD PORTFOLIOS
+# ============================================
 st.sidebar.markdown("---")
 
-# Load Portfolio Section
+# ✅ LOAD PORTFOLIO SECTION (with Rename/Delete)
 try:
     all_portfolios = portfolios_ws.get_all_records()
     
-    # Filter user portfolios safely
+    # Filter: Show only ACTIVE portfolios for current user
     user_portfolios = [
         p for p in all_portfolios 
         if st.session_state.get("user_email") and 
-           p.get("email", "").lower() == st.session_state["user_email"].lower()
+           p.get("email", "").lower() == st.session_state["user_email"].lower() and
+           p.get("status", "active").lower() == "active"
     ]
 
     if user_portfolios:
@@ -681,29 +738,99 @@ try:
             portfolio_options
         )
         
-        if st.sidebar.button("🚀 Load Portfolio"):
-            selected_index = portfolio_options.index(selected_display)
-            chosen = user_portfolios[selected_index]
+        selected_index = portfolio_options.index(selected_display)
+        selected_portfolio = user_portfolios[selected_index]
+        
+        # Action buttons
+        col_load, col_rename, col_delete = st.sidebar.columns(3)
+        
+        with col_load:
+            if st.button("🚀 Load", use_container_width=True):
+                loaded_tickers = selected_portfolio["tickers"].split(",")
+                loaded_weights = [float(w) for w in selected_portfolio["weight"].split(",")]
+                
+                st.session_state["loaded_tickers"] = loaded_tickers
+                st.session_state["loaded_weights"] = loaded_weights
+                
+                if selected_portfolio.get("optimized_weights"):
+                    opt_weights_str = selected_portfolio["optimized_weights"]
+                    if opt_weights_str:
+                        st.session_state["opt_weights"] = [float(w) for w in opt_weights_str.split(",")]
+                        st.session_state["use_optimized"] = True
+                
+                st.sidebar.success(f"✅ Loading {selected_portfolio['portfolio_name']}...")
+                st.rerun()
+        
+        with col_rename:
+            if st.button("✏️ Edit", use_container_width=True):
+                st.session_state["renaming_portfolio"] = selected_portfolio["portfolio_id"]
+                st.rerun()
+        
+        with col_delete:
+            if st.button("🗑️ Delete", use_container_width=True):
+                st.session_state["deleting_portfolio"] = selected_portfolio["portfolio_id"]
+                st.rerun()
+        
+        # Rename dialog
+        if st.session_state.get("renaming_portfolio") == selected_portfolio["portfolio_id"]:
+            new_name = st.sidebar.text_input(
+                "New portfolio name:",
+                value=selected_portfolio["portfolio_name"],
+                key="rename_input"
+            )
             
-            loaded_tickers = chosen["tickers"].split(",")
-            loaded_weights = [float(w) for w in chosen["weight"].split(",")]
+            col_confirm, col_cancel = st.sidebar.columns(2)
             
-            st.session_state["loaded_tickers"] = loaded_tickers
-            st.session_state["loaded_weights"] = loaded_weights
+            with col_confirm:
+                if st.button("✅ Confirm", use_container_width=True):
+                    if new_name and new_name.strip():
+                        success = rename_portfolio(
+                            selected_portfolio["portfolio_id"],
+                            new_name.strip(),
+                            portfolios_ws
+                        )
+                        if success:
+                            st.sidebar.success("✅ Renamed!")
+                            del st.session_state["renaming_portfolio"]
+                            st.rerun()
+                    else:
+                        st.sidebar.error("Name cannot be empty")
             
-            if chosen.get("optimized_weights"):
-                opt_weights_str = chosen["optimized_weights"]
-                if opt_weights_str:
-                    st.session_state["opt_weights"] = [float(w) for w in opt_weights_str.split(",")]
-                    st.session_state["use_optimized"] = True
+            with col_cancel:
+                if st.button("❌ Cancel", use_container_width=True):
+                    del st.session_state["renaming_portfolio"]
+                    st.rerun()
+        
+        # Delete confirmation dialog
+        if st.session_state.get("deleting_portfolio") == selected_portfolio["portfolio_id"]:
+            st.sidebar.warning(f"⚠️ Delete {selected_portfolio['portfolio_name']}?")
             
-            st.sidebar.success(f"✅ Loading {chosen['portfolio_name']}...")
-            st.rerun()
+            col_confirm, col_cancel = st.sidebar.columns(2)
+            
+            with col_confirm:
+                if st.button("✅ Delete", use_container_width=True):
+                    success = soft_delete_portfolio(
+                        selected_portfolio["portfolio_id"],
+                        portfolios_ws
+                    )
+                    if success:
+                        st.sidebar.success("✅ Portfolio deleted!")
+                        del st.session_state["deleting_portfolio"]
+                        st.rerun()
+            
+            with col_cancel:
+                if st.button("❌ Cancel", use_container_width=True):
+                    del st.session_state["deleting_portfolio"]
+                    st.rerun()
 
 except Exception as e:
     st.sidebar.error(f"Error loading portfolios: {e}")
 
-# Save Portfolio
+
+# ✅ SAVE PORTFOLIO SECTION (UNCHANGED - Still here!)
+st.sidebar.markdown("---")
+st.sidebar.subheader("💾 Save Current Portfolio")
+
 portfolio_name = st.sidebar.text_input("Portfolio Name", placeholder="e.g., Tech Growth")
 
 if st.sidebar.button("💾 Save Portfolio Snapshot"):
@@ -724,8 +851,6 @@ if st.sidebar.button("💾 Save Portfolio Snapshot"):
         st.sidebar.success("✅ Saved!")
     except Exception as e:
         st.sidebar.error(f"Error: {e}")
-
-
 
 # ============================================
 # FOOTER & DISCLAIMER (Shifted Up)

@@ -5,27 +5,17 @@
 
 
 
-7. Efficient Frontier (4 hours) 
-8. Educational Tooltips (2 hours) 
-9. Add Sortino and max beyond VaR and Beta
-
-
-
-Bugs:
-fix date as dropna removes day1
-allow user to rename / delete saved portfolios
-
-
-
+7. Efficient Frontier 
+8. Educational Tooltips 
 
 Notes:
 🏔️ The Efficient Frontier: The "Hedge Fund" scatter plot.
+user inputable risk bar
 Generate 2,000+ random portfolios.
 Plot Risk vs. Return scatter plot.
 Draw the "Frontier Curve" to show the user where their portfolio sits relative to the market potential.
 
-🎓 Educational Tooltips: Small ? icons explaining "Sharpe Ratio", "VaR", etc., in plain English. Also
-✅ 1️⃣ Insight Panels (high value, easy)
+✅ 1️⃣ free LLM API driven Insight Panels 
 
 Add short, human-readable interpretations:
 Walk through how covariance pushes TSLA weight to zero sometimes(explain to me and add to UI)

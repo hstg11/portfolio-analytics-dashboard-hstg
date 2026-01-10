@@ -191,7 +191,9 @@ def save_portfolio(email, name, portfolio_name, tickers, weights, portfolios_ws,
             tickers_str,
             weights_str,
             opt_weights_str,
-            now_ist()
+            now_ist(),
+            "active"  # ✅ NEW: All new portfolios are active
+
         ])
         return True
     except Exception as e:
@@ -199,6 +201,42 @@ def save_portfolio(email, name, portfolio_name, tickers, weights, portfolios_ws,
         return False
 
 
+def rename_portfolio(portfolio_id, new_name, portfolios_ws):
+    """Rename a portfolio by updating its name in Google Sheets"""
+    try:
+        # Get all records
+        all_records = portfolios_ws.get_all_records()
+        
+        # Find the row with matching portfolio_id
+        for idx, row in enumerate(all_records, start=2):  # start=2 because row 1 is header
+            if row.get('portfolio_id') == portfolio_id:
+                # Update the portfolio_name column (column 4)
+                portfolios_ws.update_cell(idx, 4, new_name)
+                return True
+        
+        return False
+    except Exception as e:
+        st.error(f"Error renaming portfolio: {e}")
+        return False
+
+
+def soft_delete_portfolio(portfolio_id, portfolios_ws):
+    """Mark portfolio as deleted (soft delete - keeps in sheet)"""
+    try:
+        # Get all records
+        all_records = portfolios_ws.get_all_records()
+        
+        # Find the row with matching portfolio_id
+        for idx, row in enumerate(all_records, start=2):  # start=2 because row 1 is header
+            if row.get('portfolio_id') == portfolio_id:
+                # Update the status column (column 9) to "deleted"
+                portfolios_ws.update_cell(idx, 9, "deleted")
+                return True
+        
+        return False
+    except Exception as e:
+        st.error(f"Error deleting portfolio: {e}")
+        return False
 # ============================================
 # SIGNUP GATE UI
 # ============================================
