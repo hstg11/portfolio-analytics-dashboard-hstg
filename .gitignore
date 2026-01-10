@@ -41,3 +41,5 @@ test_*.py
 
 # Docker
 .devcontainer/
+
+AI_insights.py

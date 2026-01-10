@@ -175,10 +175,9 @@ risk_free = st.sidebar.number_input(
 # ============================================
 # TABS
 # ============================================
-tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer = st.tabs(
-    ["📊 Overview", "⚠️ Risk", "📈 Benchmark", "🎲 Monte Carlo" , "Optimizer"]
+tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer, tab_frontier = st.tabs(
+    ["📊 Overview", "⚠️ Risk", "📈 Benchmark", "🎲 Monte Carlo", "🔧 Optimizer", "🏔️ Efficient Frontier"]
 )
-
 # ============================================
 # OVERVIEW TAB
 # ============================================
@@ -709,8 +708,471 @@ with tab_optimizer:
                 st.rerun()
 
 # ============================================
-# SIDEBAR: SAVE/LOAD PORTFOLIOS
+# EFFICIENT FRONTIER TAB
 # ============================================
+# ============================================
+# EFFICIENT FRONTIER TAB
+# ============================================
+with tab_frontier:
+    st.header("🏔️ Efficient Frontier")
+    
+    st.write("""
+    The **Efficient Frontier** shows all possible portfolio combinations and identifies 
+    the optimal risk-return trade-offs. Each dot represents a different allocation strategy.
+    """)
+    
+    # ✅ SAFETY: Clear frontier cache if tickers changed
+    if 'frontier_data' in st.session_state:
+        if 'current' in st.session_state['frontier_data']:
+            cached_num_tickers = len(st.session_state['frontier_data']['current']['weights'])
+            if cached_num_tickers != len(tickers_list):
+                del st.session_state['frontier_data']
+                st.info("ℹ️ Ticker list changed. Please regenerate the efficient frontier.")
+
+    # === USER CONTROLS ===
+    st.subheader("⚙️ Simulation Settings")
+    
+    col_settings1, col_settings2 = st.columns(2)
+    
+    
+    with col_settings1:
+        num_random = st.slider(
+            "Number of random portfolios",
+            min_value=500,
+            max_value=5000,
+            value=2000,
+            step=500,
+            help="More portfolios = smoother visualization but slower computation"
+        )
+    
+    with col_settings2:
+        target_risk = st.slider(
+            "Your risk tolerance (annual volatility %)",
+            min_value=5.0,
+            max_value=50.0,
+            value=20.0,
+            step=1.0,
+            help="Maximum volatility you're comfortable with"
+        )
+
+    # === GENERATE BUTTON ===
+    if st.button("🚀 Generate Efficient Frontier", type="primary", use_container_width=True):
+        with st.spinner("🔄 Generating portfolios... This may take 10-30 seconds..."):
+            
+            # Calculate required data
+            mean_returns = returns.mean() * 252
+            cov_matrix = returns.cov() * 252
+            
+            # Generate random portfolios (the dots)
+            random_df = generate_random_portfolios(
+                mean_returns,
+                cov_matrix,
+                risk_free,
+                num_portfolios=num_random,
+                lower_limit=lower_limit
+            )
+            
+            # Generate efficient frontier curve (the red line)
+            frontier_df = get_efficient_frontier_curve(
+                mean_returns,
+                cov_matrix,
+                risk_free,
+                lower_limit=lower_limit,
+                num_points=50
+            )
+            
+            # Calculate current portfolio position
+            current_weights = np.array(weights)
+            current_return = portfolio_return_opt(current_weights, mean_returns)
+            current_vol = portfolio_volatility_opt(current_weights, cov_matrix)
+            current_sharpe = (current_return - risk_free) / current_vol if current_vol != 0 else 0.0
+            
+            # Find top 5 efficient portfolios
+            top5_efficient = frontier_df.nlargest(5, 'sharpe')
+            
+            # Find optimal portfolio within risk tolerance
+            optimal_at_risk = find_optimal_portfolio_at_risk(frontier_df, target_risk)
+            
+            # Store everything in session state (cache it)
+            st.session_state['frontier_data'] = {
+                'random': random_df,
+                'frontier': frontier_df,
+                'top5': top5_efficient,
+                'optimal_at_risk': optimal_at_risk,
+                'current': {
+                    'return': current_return,
+                    'volatility': current_vol,
+                    'sharpe': current_sharpe,
+                    'weights': current_weights
+                },
+                'params': {
+                    'num_random': num_random,
+                    'target_risk': target_risk
+                }
+            }
+            
+            st.success("✅ Efficient Frontier generated successfully!")
+            st.rerun()
+    
+    # === DISPLAY RESULTS (OUTSIDE BUTTON BLOCK) ===
+    if 'frontier_data' in st.session_state:
+        data = st.session_state['frontier_data']
+        random_df = data['random']
+        frontier_df = data['frontier']
+        top5 = data['top5']
+        optimal_at_risk = data['optimal_at_risk']
+        current = data['current']
+        params = data['params']
+        
+        # === CHART ===
+        st.subheader("📊 Risk-Return Landscape")
+        
+        # Prepare data for visualization
+        random_df_chart = random_df.copy()
+        random_df_chart['type'] = 'Random Portfolio'
+        random_df_chart['return_pct'] = random_df_chart['return'] * 100
+        random_df_chart['volatility_pct'] = random_df_chart['volatility'] * 100
+        
+        frontier_df_chart = frontier_df.copy()
+        frontier_df_chart['type'] = 'Efficient Frontier'
+        frontier_df_chart['return_pct'] = frontier_df_chart['return'] * 100
+        frontier_df_chart['volatility_pct'] = frontier_df_chart['volatility'] * 100
+        
+        current_df = pd.DataFrame([{
+            'volatility_pct': current['volatility'] * 100,
+            'return_pct': current['return'] * 100,
+            'sharpe': current['sharpe'],
+            'type': 'Your Portfolio'
+        }])
+
+        # Random portfolios (gray dots)
+        scatter = alt.Chart(random_df_chart).mark_circle(
+            size=30,
+            opacity=0.3
+        ).encode(
+            x=alt.X('volatility_pct:Q', 
+                   title='Risk (Annualized Volatility %)',
+                   scale=alt.Scale(zero=False)),
+            y=alt.Y('return_pct:Q', 
+                   title='Expected Return (%)',
+                   scale=alt.Scale(zero=False)),
+            color=alt.Color('sharpe:Q',
+                          scale=alt.Scale(scheme='viridis'),
+                          legend=alt.Legend(title='Sharpe Ratio')),
+            tooltip=[
+                alt.Tooltip('volatility_pct:Q', title='Risk (%)', format='.2f'),
+                alt.Tooltip('return_pct:Q', title='Return (%)', format='.2f'),
+                alt.Tooltip('sharpe:Q', title='Sharpe', format='.2f')
+            ]
+        ).properties(
+            width=800,
+            height=500
+        )
+
+        # Efficient frontier (red dashed line)
+        frontier_line = alt.Chart(frontier_df_chart).mark_line(
+            color='#FF4444',
+            size=3,
+            strokeDash=[5, 5]
+        ).encode(
+            x='volatility_pct:Q',
+            y='return_pct:Q',
+            tooltip=[
+                alt.Tooltip('volatility_pct:Q', title='Risk (%)', format='.2f'),
+                alt.Tooltip('return_pct:Q', title='Return (%)', format='.2f'),
+                alt.Tooltip('sharpe:Q', title='Sharpe', format='.2f')
+            ]
+        )
+
+        # Your current portfolio (green diamond) - ✅ SOFTER GREEN
+        current_point = alt.Chart(current_df).mark_point(
+            shape='diamond',
+            size=400,
+            color='#2ECC71',  # ✅ Changed from #00FF00
+            filled=True,
+            stroke='white',
+            strokeWidth=3
+        ).encode(
+            x='volatility_pct:Q',
+            y='return_pct:Q',
+            tooltip=[
+                alt.Tooltip('volatility_pct:Q', title='Your Risk (%)', format='.2f'),
+                alt.Tooltip('return_pct:Q', title='Your Return (%)', format='.2f'),
+                alt.Tooltip('sharpe:Q', title='Your Sharpe', format='.2f')
+            ]
+        )
+
+        # Risk tolerance vertical line (orange)
+        risk_line_data = pd.DataFrame({
+            'volatility_pct': [params['target_risk'], params['target_risk']],
+            'return_pct': [
+                random_df_chart['return_pct'].min(),
+                random_df_chart['return_pct'].max()
+            ]
+        })
+        
+        risk_line = alt.Chart(risk_line_data).mark_rule(
+            color='orange',
+            size=2,
+            strokeDash=[10, 5]
+        ).encode(
+            x='volatility_pct:Q'
+        )
+
+        # Combine all chart layers
+        final_chart = (
+            scatter + 
+            frontier_line + 
+            current_point + 
+            risk_line
+        ).properties(
+            title='Efficient Frontier: Risk vs. Return Landscape'
+        )
+        
+        st.altair_chart(final_chart, use_container_width=True)
+        
+        # Legend
+        st.caption("""
+        🔵 **Gray dots** = Random portfolios (all possible combinations)  
+        🔴 **Red dashed line** = Efficient Frontier (optimal portfolios)  
+        💎 **Green diamond** = Your current portfolio  
+        🟠 **Orange line** = Your risk tolerance limit ({:.0f}%)
+        """.format(params['target_risk']))
+
+        # === YOUR POSITION ANALYSIS ===
+        st.subheader("📍 Your Portfolio Position")
+        
+        col_pos1, col_pos2, col_pos3 = st.columns(3)
+        
+        with col_pos1:
+            st.metric(
+                "Your Risk",
+                f"{current['volatility']*100:.2f}%",
+                delta=f"{(current['volatility']*100 - params['target_risk']):.2f}% vs tolerance"
+            )
+        
+        with col_pos2:
+            st.metric(
+                "Your Return",
+                f"{current['return']*100:.2f}%",
+                delta=None
+            )
+        
+        with col_pos3:
+            st.metric(
+                "Your Sharpe Ratio",
+                f"{current['sharpe']:.2f}",
+                delta=None
+            )
+
+        # === OPTIMAL PORTFOLIO RECOMMENDATION ===
+        st.divider()
+        st.subheader("🎯 Optimal Portfolio Within Your Risk Tolerance")
+        
+        # ✅ FIXED: Proper if/else structure
+        if optimal_at_risk is not None:
+            col_opt1, col_opt2, col_opt3 = st.columns(3)
+            
+            with col_opt1:
+                st.metric(
+                    "Optimal Risk",
+                    f"{optimal_at_risk['volatility']*100:.2f}%",
+                    delta=f"{(optimal_at_risk['volatility']*100 - current['volatility']*100):.2f}% vs yours"
+                )
+            
+            with col_opt2:
+                st.metric(
+                    "Optimal Return",
+                    f"{optimal_at_risk['return']*100:.2f}%",
+                    delta=f"{(optimal_at_risk['return']*100 - current['return']*100):.2f}% vs yours"
+                )
+            
+            with col_opt3:
+                st.metric(
+                    "Optimal Sharpe",
+                    f"{optimal_at_risk['sharpe']:.2f}",
+                    delta=f"{(optimal_at_risk['sharpe'] - current['sharpe']):.2f} vs yours"
+                )
+            
+            # Improvement message
+            return_improvement = (optimal_at_risk['return'] - current['return']) * 100
+            
+            if return_improvement > 0.5:
+                st.success(f"""
+                ✅ **You can improve!** By optimizing your allocation, you could achieve 
+                **{optimal_at_risk['return']*100:.2f}% return** (vs your current {current['return']*100:.2f}%) 
+                while staying within your {params['target_risk']:.0f}% risk tolerance.
+                
+                That's an additional **{return_improvement:.2f}%** annual return for the same risk level!
+                """)
+            elif abs(return_improvement) <= 0.5:
+                st.info(f"""
+                👍 **Your portfolio is already near-optimal!** You're getting 
+                **{current['return']*100:.2f}% return** at **{current['volatility']*100:.2f}% risk**, 
+                which is very close to the efficient frontier.
+                """)
+            else:
+                if current['volatility']*100 > params['target_risk']:
+                    st.warning(f"""
+                    ⚠️ **Your current portfolio ({current['volatility']*100:.2f}% risk) exceeds your stated risk tolerance ({params['target_risk']:.0f}%).**
+                    
+                    The optimal portfolio within your {params['target_risk']:.0f}% tolerance has:
+                    - **{optimal_at_risk['return']*100:.2f}% return** (vs your {current['return']*100:.2f}%)
+                    - **{optimal_at_risk['volatility']*100:.2f}% risk** (vs your {current['volatility']*100:.2f}%)
+                    
+                    **Options:**
+                    1. **Increase risk tolerance** to {current['volatility']*100:.0f}%+ to accommodate your current strategy
+                    2. **Reduce allocation** to match your {params['target_risk']:.0f}% tolerance (but accept lower return)
+                    3. **Keep current allocation** if you're comfortable with the extra risk
+                    """)
+                else:
+                    st.warning(f"""
+                    ⚠️ **Your risk tolerance may be too restrictive.** The optimal portfolio within 
+                    {params['target_risk']:.0f}% risk has lower return ({optimal_at_risk['return']*100:.2f}%) 
+                    than your current portfolio ({current['return']*100:.2f}%).
+                    
+                    Consider increasing your risk tolerance or adjusting your allocation.
+                    """)
+            
+            # === SHOW OPTIMAL WEIGHTS ===
+            st.subheader("📊 Optimal Portfolio Allocation")
+            st.write(f"These weights would give you **{optimal_at_risk['return']*100:.2f}% return** at **{optimal_at_risk['volatility']*100:.2f}% risk**:")
+            
+            # Get optimal weights
+            optimal_weights = optimal_at_risk['weights']
+            
+            # Create comparison table
+            weights_comparison = pd.DataFrame({
+                'Asset': tickers_list,
+                'Current Weight (%)': (current['weights'] * 100).round(2),
+                'Optimal Weight (%)': (optimal_weights * 100).round(2),
+                'Change (%)': ((optimal_weights - current['weights']) * 100).round(2)
+            })
+            
+            # Sort by optimal weight (highest first)
+            weights_comparison = weights_comparison.sort_values('Optimal Weight (%)', ascending=False).reset_index(drop=True)
+            
+            # Style the dataframe
+            st.dataframe(
+                weights_comparison,
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Highlight major changes
+            major_changes = weights_comparison[abs(weights_comparison['Change (%)']) > 5.0]
+            
+            if not major_changes.empty:
+                st.caption("💡 **Major changes (>5%):**")
+                for _, row in major_changes.iterrows():
+                    direction = "increase" if row['Change (%)'] > 0 else "decrease"
+                    st.caption(f"• **{row['Asset']}**: {direction} by {abs(row['Change (%)']):.2f}% (from {row['Current Weight (%)']}% to {row['Optimal Weight (%)']}%)")
+            
+            # ✅ CORRECTED: Apply button
+            st.divider()
+            if st.button("✅ Apply Optimal Weights to Portfolio", type="primary", use_container_width=True):
+                st.session_state["loaded_weights"] = optimal_weights.tolist()
+                st.session_state["use_optimized"] = True  # ✅ Enable optimized mode
+                st.session_state["opt_weights"] = optimal_weights.tolist()  # ✅ Store in opt_weights
+                st.success("✅ Optimal weights loaded! Scroll up to see updated portfolio.")
+                st.balloons()
+                st.rerun()
+        
+        # ✅ ADDED: else block (only shows when optimal_at_risk is None)
+        else:
+            st.warning(f"""
+            ⚠️ **No efficient portfolios found within your {params['target_risk']:.0f}% risk tolerance.**
+            
+            This means even the safest portfolio on the efficient frontier exceeds your risk limit.
+            
+            **Suggestions:**
+            - Increase your risk tolerance slider
+            - Reduce the minimum weight constraint (currently {lower_limit:.0f}%)
+            - Consider adding lower-volatility assets to your portfolio
+            """)
+        
+        # === TOP 5 EFFICIENT PORTFOLIOS ===
+        st.divider()
+        st.subheader("🏆 Top 5 Efficient Portfolios (Highest Sharpe Ratios)")
+        
+        st.write("""
+        These are the best risk-adjusted portfolios on the efficient frontier. 
+        They offer the highest returns per unit of risk taken.
+        """)
+        
+        # Format the top 5 for display
+        top5_display = top5.copy()
+        top5_display['Return (%)'] = (top5_display['return'] * 100).round(2)
+        top5_display['Risk (%)'] = (top5_display['volatility'] * 100).round(2)
+        top5_display['Sharpe Ratio'] = top5_display['sharpe'].round(2)
+        
+        # Show only relevant columns
+        top5_display = top5_display[['Return (%)', 'Risk (%)', 'Sharpe Ratio']].reset_index(drop=True)
+        top5_display.index = top5_display.index + 1
+        top5_display.index.name = 'Rank'
+        
+        st.dataframe(
+            top5_display,
+            use_container_width=True,
+            hide_index=False
+        )
+        
+        # Highlight if user's portfolio is in top 5
+        user_sharpe = current['sharpe']
+        top5_sharpes = top5['sharpe'].values
+        
+        if user_sharpe in top5_sharpes:
+            rank = list(top5_sharpes).index(user_sharpe) + 1
+            st.success(f"🌟 **Congratulations!** Your portfolio ranks #{rank} among the top efficient portfolios!")
+        elif user_sharpe > top5_sharpes.min():
+            st.info("👍 Your portfolio has a competitive Sharpe ratio, close to the top performers!")
+        else:
+            worst_top5_sharpe = top5_sharpes.min()
+            st.warning(f"📊 Your Sharpe ratio ({user_sharpe:.2f}) could be improved. The 5th best portfolio has a Sharpe of {worst_top5_sharpe:.2f}.")
+        
+        # === EDUCATIONAL SECTION ===
+        with st.expander("🎓 Understanding the Efficient Frontier"):
+            st.markdown("""
+            ### What am I looking at?
+            
+            **The Chart:**
+            - Each gray dot = one possible portfolio allocation
+            - X-axis = Risk (volatility)
+            - Y-axis = Expected return
+            - Color = Sharpe ratio (yellow = better risk-adjusted return)
+            
+            **The Red Line (Efficient Frontier):**
+            - Shows **optimal portfolios** only
+            - For each risk level, this is the **maximum possible return**
+            - Portfolios below this line are "inefficient" (you can do better!)
+            
+            **Your Position:**
+            - 💎 **On the line?** Perfect! You're optimized.
+            - 💎 **Below the line?** You're leaving money on the table.
+            - 💎 **Above the line?** Rare - check your data or you've found alpha!
+            
+            ### Why does this matter?
+            
+            **Diversification benefit:**
+            - The frontier curves because of correlations between assets
+            - You can reduce risk WITHOUT sacrificing return by smart allocation
+            - That's the power of modern portfolio theory
+            
+            **Risk tolerance:**
+            - The orange line shows your max acceptable risk
+            - Find the highest point on the red line LEFT of the orange line
+            - That's your optimal portfolio
+            
+            ### What should I do?
+            
+            1. **If below the frontier:** Use the optimizer to improve allocation
+            2. **If on the frontier:** You're doing great!
+            3. **If risk tolerance is too low:** Consider if you can accept slightly more risk for better returns
+            4. **Check the Top 5 table:** See what allocations work best
+            """)
+
+    else:
+        st.info("👆 Click '🚀 Generate Efficient Frontier' to visualize your portfolio's position in the risk-return landscape.")
 # ============================================
 # SIDEBAR: SAVE/LOAD PORTFOLIOS
 # ============================================
