@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 from streamlit_cookies_manager import EncryptedCookieManager
 from google.oauth2.service_account import Credentials
 import gspread
+import pytz
+
 
 from config import (
     COOKIE_PREFIX, COOKIE_PASSWORD, GOOGLE_SHEETS_SCOPE,
@@ -204,21 +206,21 @@ def save_portfolio(email, name, portfolio_name, tickers, weights, portfolios_ws,
 def rename_portfolio(portfolio_id, new_name, portfolios_ws):
     """Rename a portfolio by updating its name in Google Sheets"""
     try:
-        # Get all records
         all_records = portfolios_ws.get_all_records()
         
-        # Find the row with matching portfolio_id
-        for idx, row in enumerate(all_records, start=2):  # start=2 because row 1 is header
+        for idx, row in enumerate(all_records, start=2):
             if row.get('portfolio_id') == portfolio_id:
-                # Update the portfolio_name column (column 4)
+                # ✅ Column 4 is portfolio_name
                 portfolios_ws.update_cell(idx, 4, new_name)
                 return True
         
+        # ✅ Only show error if loop completes without finding portfolio
+        st.error(f"Portfolio {portfolio_id} not found")
         return False
+        
     except Exception as e:
         st.error(f"Error renaming portfolio: {e}")
         return False
-
 
 def soft_delete_portfolio(portfolio_id, portfolios_ws):
     """Mark portfolio as deleted (soft delete - keeps in sheet)"""
@@ -371,3 +373,84 @@ def logout(cookies):
     st.session_state["last_seen_updated"] = False
     
     st.rerun()
+
+from datetime import datetime, timezone
+import pytz
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def _safe_int(x, default=0):
+    try:
+        return int(float(x))
+    except Exception:
+        return default
+
+
+def increment_ai_call(users_ws, email: str, call_type: str):
+    """
+    Increment per-user Gemini API call counters in Google Sheets.
+
+    call_type: "quick" or "full"
+    Updates:
+      quick_calls, full_calls, total_calls, last_api_call (IST)
+    """
+
+    if not email:
+        return
+
+    call_type = call_type.lower().strip()
+    if call_type not in ("quick", "full"):
+        raise ValueError("call_type must be 'quick' or 'full'")
+
+    # Get header row
+    headers = users_ws.row_values(1)
+    headers_norm = [h.strip().lower() for h in headers]
+
+    # Required columns
+    required_cols = ["email", "quick_calls", "full_calls", "total_calls", "last_api_call"]
+
+    missing = [c for c in required_cols if c not in headers_norm]
+    if missing:
+        # ❌ Don't raise - log and skip tracking instead
+        import logging
+        logging.warning(f"AI tracking disabled: missing columns {missing}")
+        return  # Silent fail, app continues working
+
+    email_col = headers_norm.index("email") + 1
+    quick_col = headers_norm.index("quick_calls") + 1
+    full_col = headers_norm.index("full_calls") + 1
+    total_col = headers_norm.index("total_calls") + 1
+    last_call_col = headers_norm.index("last_api_call") + 1
+
+    # Find user row
+    emails = users_ws.col_values(email_col)  # includes header
+    emails_lower = [e.strip().lower() for e in emails]
+
+    if email.strip().lower() not in emails_lower:
+        # user not found → do nothing (or you can create row)
+        return
+
+    row_idx = emails_lower.index(email.strip().lower()) + 1
+
+    # Read current counters
+    current_quick = _safe_int(users_ws.cell(row_idx, quick_col).value, 0)
+    current_full  = _safe_int(users_ws.cell(row_idx, full_col).value, 0)
+    current_total = _safe_int(users_ws.cell(row_idx, total_col).value, 0)
+
+    # Apply increments
+    if call_type == "quick":
+        current_quick += 1
+    else:
+        current_full += 1
+
+    current_total += 1
+
+    # Timestamp (IST)
+    now_ist = datetime.now(timezone.utc).astimezone(IST).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Update in one batch
+    users_ws.update(
+        f"{gspread.utils.rowcol_to_a1(row_idx, quick_col)}:{gspread.utils.rowcol_to_a1(row_idx, last_call_col)}",
+        [[current_quick, current_full, current_total, now_ist]]
+    )

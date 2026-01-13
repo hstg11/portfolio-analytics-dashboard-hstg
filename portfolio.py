@@ -135,17 +135,20 @@ def rolling_risk(portfolio_return: pd.Series, window: int, risk_free_rate: float
 
 def benchmark_series(symbol: str, start_date, end_date):
     """Download benchmark close, returns, cumulative index."""
+    # ✅ Add 1 day buffer like portfolio
+    adjusted_start = start_date - pd.Timedelta(days=1)
+    
     benchmark = yf.download(
         symbol,
-        start=start_date,
+        start=adjusted_start,  # Match portfolio behavior
         end=end_date,
         auto_adjust=True,
         progress=False
     )["Close"]
+    
     bench_ret = benchmark.pct_change().dropna()
     bench_cum = (1 + bench_ret).cumprod()
     return bench_ret, bench_cum
-
 
 def portfolio_beta(
     portfolio_returns: pd.Series,

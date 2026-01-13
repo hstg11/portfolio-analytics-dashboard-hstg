@@ -1,9 +1,11 @@
 # config.py
+import streamlit as st
 
 # ------------------ Cookie Settings ------------------
 COOKIE_PREFIX = "portfolio_dashboard"
-COOKIE_PASSWORD = "super_secret_password_change_me"
+# config.py
 
+COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", "fallback_only_for_local")
 # ------------------ Google Sheets ------------------
 GOOGLE_SHEETS_SCOPE = [
     "https://www.googleapis.com/auth/spreadsheets",

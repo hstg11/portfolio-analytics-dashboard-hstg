@@ -7,10 +7,7 @@
 
 
 Notes: 
-
-To be sent for testing:
-    Changes
-    ReadMe + Security checks(Passwords, API key)
+ReadMe
 
 
 
@@ -19,7 +16,7 @@ To be sent for testing:
  Risk Attribution MCTR
  Return Attribution
  Stress testing
- 🖨️ Export Report: A button to download a PDF or CSV summary.
+ 🖨️ Export Report: A button to download a PDF summary.
 
 
 

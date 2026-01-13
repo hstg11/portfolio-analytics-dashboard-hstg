@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import altair as alt
-
+import re
 from auth import *
 from portfolio import *
 from optimizer import *
@@ -18,6 +18,7 @@ st.set_page_config(layout="wide")
 # ============================================
 cookies = init_cookie_manager()
 users_ws, portfolios_ws = init_google_sheets()
+st.session_state["users_ws"] = users_ws
 users_df = fetch_users_data(users_ws)
 
 # ============================================
@@ -90,10 +91,15 @@ st.session_state["current_tickers"] = tickers
 start_date = st.sidebar.date_input("Start Date", value=pd.to_datetime("2020-01-01"))
 end_date = st.sidebar.date_input("End Date", value=pd.to_datetime("today"))
 
-tickers_list = [t.strip() for t in tickers.split(",")]
+def validate_ticker(ticker: str) -> bool:
+    """Basic ticker validation"""
+    return bool(re.match(r'^[A-Z0-9\.\-]{1,10}$', ticker.upper()))
 
-tickers_list = [t.strip() for t in tickers.split(",")]
-
+tickers_list = [t.strip().upper() for t in tickers.split(",")]
+invalid = [t for t in tickers_list if not validate_ticker(t)]
+if invalid:
+    st.error(f"Invalid tickers: {', '.join(invalid)}")
+    st.stop()
 # ✅ Detect if ticker count changed - reset to equal weights
 if "last_ticker_count" not in st.session_state:
     st.session_state["last_ticker_count"] = len(tickers_list)
@@ -166,8 +172,13 @@ else:
 # ============================================
 # WEIGHT VALIDATION
 # ============================================
-if abs(sum(weights) - 1) > 0.001:
-    st.sidebar.warning("⚠️ Weights must add up to 100%. Adjust them to continue.")
+total = sum(weights)
+
+if abs(total - 1) > 0.001:
+    st.sidebar.warning(f"⚠️ Weights sum to {total*100:.2f}%. Adjust to 100%.")
+elif abs(total - 1) > 1e-6:  # Close enough, auto-normalize
+    weights = [w / total for w in weights]
+    st.sidebar.caption(f"✅ Normalized to 100%")
 else:
     st.sidebar.caption("✅ Total: 100%")
 
@@ -729,14 +740,18 @@ with tab_frontier:
     the optimal risk-return trade-offs. Each dot represents a different allocation strategy.
     """)
     
-    # ✅ SAFETY: Clear frontier cache if tickers changed
+        # ✅ SAFETY: Clear frontier cache if tickers changed
     if 'frontier_data' in st.session_state:
-        if 'current' in st.session_state['frontier_data']:
-            cached_num_tickers = len(st.session_state['frontier_data']['current']['weights'])
-            if cached_num_tickers != len(tickers_list):
-                del st.session_state['frontier_data']
-                st.info("ℹ️ Ticker list changed. Please regenerate the efficient frontier.")
-
+        # ✅ Check both count AND ticker names
+        cached_tickers = st.session_state.get('frontier_tickers')
+        current_tickers = ",".join(sorted(tickers_list))
+        
+        if cached_tickers != current_tickers:
+            del st.session_state['frontier_data']
+            if 'frontier_tickers' in st.session_state:
+                del st.session_state['frontier_tickers']
+            st.info("ℹ️ Ticker list changed. Please regenerate the efficient frontier.")
+        
     # === USER CONTROLS ===
     st.subheader("⚙️ Simulation Settings")
     
@@ -801,7 +816,6 @@ with tab_frontier:
             # Find optimal portfolio within risk tolerance
             optimal_at_risk = find_optimal_portfolio_at_risk(frontier_df, target_risk)
             
-            # Store everything in session state (cache it)
             st.session_state['frontier_data'] = {
                 'random': random_df,
                 'frontier': frontier_df,
@@ -818,6 +832,9 @@ with tab_frontier:
                     'target_risk': target_risk
                 }
             }
+
+# ✅ Store ticker snapshot for cache validation
+            st.session_state['frontier_tickers'] = ",".join(sorted(tickers_list))
             
             st.success("✅ Efficient Frontier generated successfully!")
             st.rerun()
@@ -1250,19 +1267,16 @@ try:
             
             optimal_improvement_value = (optimal_return - current_return) * 100
     
-    # ✅ NEW: Get Monte Carlo data if available
-    monte_p5 = None
-    monte_p50 = None
-    monte_p95 = None
-    monte_days = None
-    
+# Initialize Monte Carlo variables safely
+    monte_p5 = monte_p50 = monte_p95 = monte_days = None
+
     if 'sim_results' in locals() and sim_results is not None:
         final_values = sim_results[-1, :]
         monte_p5 = np.percentile(final_values, 5)
         monte_p50 = np.percentile(final_values, 50)
         monte_p95 = np.percentile(final_values, 95)
         monte_days = num_days if 'num_days' in locals() else None
-    
+        
     # Collect all data
     ai_portfolio_data = collect_portfolio_data(
         tickers_list=tickers_list,

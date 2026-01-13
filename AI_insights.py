@@ -14,6 +14,8 @@ import base64
 import streamlit as st
 from datetime import datetime, date
 import numpy as np
+from auth import increment_ai_call
+
 
 # -------------------------------
 # CONFIGURATION
@@ -465,133 +467,142 @@ def call_gemini_with_rotation(prompt, section_name=""):
 def generate_quick_summary(data_dict):
     try:
         prompt = create_quick_summary_prompt(data_dict)
-        return call_gemini_with_rotation(prompt, "Quick Summary")
+        text = call_gemini_with_rotation(prompt)
+
+        # ✅ increment sheet counter
+        try:
+            email = st.session_state.get("user_email")
+            users_ws = st.session_state.get("users_ws")
+            if users_ws and email:
+                increment_ai_call(users_ws, email, call_type="quick")
+        except Exception:
+            pass
+
+        return text
+
     except Exception as e:
         return f"Error generating summary: {str(e)}"
 
+
 @st.cache_data(ttl=86400, show_spinner=False)  # ✅ 24 hours cache
-def generate_full_analysis(data_dict):
+# Add user email to the input
+def generate_full_analysis(data_dict, user_email=None):
+    # Cache will be unique per user automatically    
     """
     Generate full analysis by calling API multiple times for each section,
     then combining the results into a cohesive report.
     """
     try:
         sections = []
-        
-        # Section 1: Always present (Portfolio Architecture & Risk)
-        with st.spinner("Generating Section 1: Portfolio Architecture & Risk Analytics..."):
-            section_1 = call_gemini_with_rotation(
-                create_section_1_prompt(data_dict),
-                "Section 1"
-            )
-            sections.append(section_1.strip())
-        
-        # Section 2: Always present (Tail Risk)
-        with st.spinner("Generating Section 2: Tail Risk Analysis..."):
-            section_2 = call_gemini_with_rotation(
-                create_section_2_prompt(data_dict),
-                "Section 2"
-            )
-            sections.append(section_2.strip())
-        
-        # Section 3: Conditional (Benchmark + Monte Carlo)
+
+        # ✅ Count how many calls are made inside this full analysis run
+        full_call_count = 0
+
+        def call_and_count(prompt, section_name):
+            nonlocal full_call_count
+            full_call_count += 1
+            return call_gemini_with_rotation(prompt)
+
+        # Section 1
+        section_1 = call_and_count(create_section_1_prompt(data_dict), "Section 1")
+        sections.append(section_1.strip())
+
+        # Section 2
+        section_2 = call_and_count(create_section_2_prompt(data_dict), "Section 2")
+        sections.append(section_2.strip())
+
+        # Section 3 (conditional)
         section_3_prompt = create_section_3_prompt(data_dict)
-        if section_3_prompt:  # ✅ Only generate if benchmark or Monte Carlo data exists
-            with st.spinner("Generating Section 3: Benchmark & Monte Carlo Analysis..."):
-                section_3 = call_gemini_with_rotation(
-                    section_3_prompt,
-                    "Section 3"
-                )
-                sections.append(section_3.strip())
-        
-        # Section 4: Conditional (Optimization)
-        if data_dict['has_optimization']:
-            with st.spinner("Generating Section 4: Optimization Analysis..."):
-                section_4 = call_gemini_with_rotation(
-                    create_section_4_prompt(data_dict),
-                    "Section 4"
-                )
-                sections.append(section_4.strip())
-        
-        # Section 5: Conditional (Frontier)
-        if data_dict['has_frontier']:
-            with st.spinner("Generating Section 5: Efficient Frontier Position..."):
-                section_5 = call_gemini_with_rotation(
-                    create_section_5_prompt(data_dict),
-                    "Section 5"
-                )
-                sections.append(section_5.strip())
-        
-        # Final Section: Always present (Conclusion)
-        with st.spinner("Generating Final Section: Strategic Summary..."):
-            conclusion = call_gemini_with_rotation(
-                create_section_conclusion_prompt(
-                    data_dict,
-                    data_dict['has_benchmark'] or data_dict['has_monte_carlo'],  # ✅ Updated condition
-                    data_dict['has_optimization'],
-                    data_dict['has_frontier']
-                ),
-                "Conclusion"
-            )
-            sections.append(conclusion.strip())
-        
-        # Add section headers for clarity (numbering dynamically)
+        if section_3_prompt:
+            section_3 = call_and_count(section_3_prompt, "Section 3")
+            sections.append(section_3.strip())
+
+        # Section 4 (conditional)
+        if data_dict.get("has_optimization"):
+            section_4 = call_and_count(create_section_4_prompt(data_dict), "Section 4")
+            sections.append(section_4.strip())
+
+        # Section 5 (conditional)
+        if data_dict.get("has_frontier"):
+            section_5 = call_and_count(create_section_5_prompt(data_dict), "Section 5")
+            sections.append(section_5.strip())
+
+        # Conclusion
+        conclusion = call_and_count(
+            create_section_conclusion_prompt(
+                data_dict,
+                data_dict.get("has_benchmark") or data_dict.get("has_monte_carlo"),
+                data_dict.get("has_optimization"),
+                data_dict.get("has_frontier"),
+            ),
+            "Conclusion"
+        )
+        sections.append(conclusion.strip())
+
+        # -------------------------
+        # ✅ Format nicely
+        # -------------------------
         section_number = 1
         formatted_sections = []
-        
-        # Section 1: Always present
+
         formatted_sections.append(f"## {section_number}. Portfolio Architecture & Risk Analytics\n\n{sections[0]}")
         section_number += 1
-        
-        # Section 2: Always present
+
         formatted_sections.append(f"## {section_number}. Tail Risk & Extreme Scenarios\n\n{sections[1]}")
         section_number += 1
-        
-        current_section_idx = 2
-        
-        # Section 3: Conditional (Benchmark + Monte Carlo)
+
+        current_idx = 2
+
         if section_3_prompt:
-            # ✅ Dynamic section title based on what data exists
             section_title = "Analysis"
-            if data_dict['has_benchmark'] and data_dict['has_monte_carlo']:
+            if data_dict.get("has_benchmark") and data_dict.get("has_monte_carlo"):
                 section_title = "Benchmark Comparison & Monte Carlo Simulation"
-            elif data_dict['has_benchmark']:
+            elif data_dict.get("has_benchmark"):
                 section_title = "Benchmark Comparison & Market Sensitivity"
-            elif data_dict['has_monte_carlo']:
+            elif data_dict.get("has_monte_carlo"):
                 section_title = "Monte Carlo Simulation & Future Scenarios"
-            
-            formatted_sections.append(f"## {section_number}. {section_title}\n\n{sections[current_section_idx]}")
+
+            formatted_sections.append(f"## {section_number}. {section_title}\n\n{sections[current_idx]}")
             section_number += 1
-            current_section_idx += 1
-        
-        # Section 4: Conditional (Optimization)
-        if data_dict['has_optimization']:
-            formatted_sections.append(f"## {section_number}. Optimization Analysis\n\n{sections[current_section_idx]}")
+            current_idx += 1
+
+        if data_dict.get("has_optimization"):
+            formatted_sections.append(f"## {section_number}. Optimization Analysis\n\n{sections[current_idx]}")
             section_number += 1
-            current_section_idx += 1
-        
-        # Section 5: Conditional (Frontier)
-        if data_dict['has_frontier']:
-            formatted_sections.append(f"## {section_number}. Efficient Frontier Position\n\n{sections[current_section_idx]}")
+            current_idx += 1
+
+        if data_dict.get("has_frontier"):
+            formatted_sections.append(f"## {section_number}. Efficient Frontier Position\n\n{sections[current_idx]}")
             section_number += 1
-            current_section_idx += 1
-        
-        # Final Section: Always present
-        formatted_sections.append(f"## {section_number}. Strategic Summary\n\n{sections[current_section_idx]}")
-        
-        # Combine all sections with horizontal rules
+            current_idx += 1
+
+        formatted_sections.append(f"## {section_number}. Strategic Summary\n\n{sections[current_idx]}")
+
         final_report = "\n\n---\n\n".join(formatted_sections)
-        
-        # Prepare the manual disclaimer
+
         disclaimer = """
-**Disclaimer:** *This analysis is generated by AI for educational purposes only. Financial markets involve significant risk. Past performance is not indicative of future results. Please consult with a certified financial advisor before making any investment decisions.*
+**Disclaimer:** *This analysis is generated by AI for educational purposes only. 
+Financial markets involve significant risk. Past performance is not indicative of future results. 
+Please consult a certified financial advisor before making any investment decisions.*
         """.strip()
 
-        # Return with a horizontal rule and the disclaimer
+        # ✅ Increment Google Sheet counters ONCE per full analysis request
+        # (but with the correct number of internal calls)
+        try:
+            email = st.session_state.get("user_email")
+            users_ws = st.session_state.get("users_ws")
+            if users_ws and email:
+                # increment "full" multiple times since full analysis = multiple calls
+                for _ in range(full_call_count):
+                    increment_ai_call(users_ws, email, call_type="full")
+        except Exception:
+            pass
+
         return f"{final_report}\n\n---\n\n{disclaimer}"
-        
+
     except Exception as e:
         return f"Error generating analysis: {str(e)}"
+
 # -------------------------------
 # TTS & UI
 # -------------------------------

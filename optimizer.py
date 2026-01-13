@@ -16,8 +16,11 @@ def portfolio_volatility_opt(weights, cov_matrix):
 def neg_sharpe(weights, mean_returns, cov_matrix, risk_free):
     ret = portfolio_return_opt(weights, mean_returns)
     vol = portfolio_volatility_opt(weights, cov_matrix)
-    return -((ret - risk_free) / vol if vol != 0 else 0.0)
-
+    
+    if vol == 0 or vol < 1e-8:  # ✅ Handle near-zero volatility
+        return 1e10  # Large penalty instead of 0
+    
+    return -((ret - risk_free) / vol)
 # ---- Max Sharpe optimization ----
 
 def max_sharpe_portfolio(mean_returns, cov_matrix, risk_free, lower_limit=0.0):
