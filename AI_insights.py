@@ -24,14 +24,28 @@ import streamlit as st
 # NEW WAY (Streamlit Cloud compatible)
 
 # List the specific keys you named in your Streamlit Secrets dashboard
-KEY_NAMES = ["GEMINI_API_KEY", "GEMINI_API_KEY2", "GEMINI_API_KEY3"]
+import streamlit as st
 
-# Collect keys from st.secrets (handles the cloud vault)
-API_KEYS = [st.secrets.get(k) for k in KEY_NAMES if st.secrets.get(k)]
+# -------------------------------
+# 1. ACCESS GEMINI KEYS (Root Level)
+# -------------------------------
+# We look for the keys exactly as named in your secrets
+gemini_key_names = ["GEMINI_API_KEY", "GEMINI_API_KEY2", "GEMINI_API_KEY3"]
+API_KEYS = [st.secrets[k] for k in gemini_key_names if k in st.secrets]
 
 if not API_KEYS:
-    st.error("No Gemini API keys found. Please add GEMINI_API_KEY to your Streamlit Secrets.")
+    st.error("No Gemini API keys found at the root level of Secrets.")
     st.stop()
+
+# -------------------------------
+# 2. ACCESS GOOGLE SERVICE ACCOUNT (Nested)
+# -------------------------------
+# Because you used [gcp_service_account] in TOML, access it like a dict:
+if "gcp_service_account" in st.secrets:
+    gcp_info = st.secrets["gcp_service_account"]
+    # Now you can use gcp_info["private_key"], gcp_info["project_id"], etc.
+else:
+    st.error("Missing [gcp_service_account] section in Secrets.")
 # Model configuration
 GEMINI_MODEL = "gemini-2.5-flash-lite"
 GENERATION_CONFIG = {
