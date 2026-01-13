@@ -13,3 +13,4 @@ google-auth
 python-dotenv
 google-generativeai
 edge-tts  # ✅ Added (replaces gTTS)
+google-genai
