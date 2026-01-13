@@ -15,25 +15,23 @@ import streamlit as st
 from datetime import datetime, date
 import numpy as np
 from auth import increment_ai_call
+import streamlit as st
 
 
 # -------------------------------
 # CONFIGURATION
 # -------------------------------
+# NEW WAY (Streamlit Cloud compatible)
 
-load_dotenv()
+# List the specific keys you named in your Streamlit Secrets dashboard
+KEY_NAMES = ["GEMINI_API_KEY", "GEMINI_API_KEY2", "GEMINI_API_KEY3"]
 
-# Collect all available keys
-API_KEYS = [
-    os.getenv("GEMINI_API_KEY"),
-    os.getenv("GEMINI_API_KEY2"),
-    os.getenv("GEMINI_API_KEY3")
-]
-API_KEYS = [k for k in API_KEYS if k]  # Remove empty/missing keys
+# Collect keys from st.secrets (handles the cloud vault)
+API_KEYS = [st.secrets.get(k) for k in KEY_NAMES if st.secrets.get(k)]
 
 if not API_KEYS:
-    raise ValueError("No GEMINI_API_KEYS found in .env file")
-
+    st.error("No Gemini API keys found. Please add GEMINI_API_KEY to your Streamlit Secrets.")
+    st.stop()
 # Model configuration
 GEMINI_MODEL = "gemini-2.5-flash-lite"
 GENERATION_CONFIG = {
