@@ -9,6 +9,7 @@ from auth import *
 from portfolio import *
 from optimizer import *
 from config import *
+from AI_insights import *  
 
 st.set_page_config(layout="wide")
 
@@ -46,6 +47,15 @@ if "current_tickers" not in st.session_state:
 
 if "current_weights_pct" not in st.session_state:
     st.session_state["current_weights_pct"] = None
+
+if "ai_quick_summary" not in st.session_state:
+    st.session_state["ai_quick_summary"] = None
+
+if "ai_full_analysis" not in st.session_state:
+    st.session_state["ai_full_analysis"] = None
+
+if "ai_analysis_generated" not in st.session_state:
+    st.session_state["ai_analysis_generated"] = False
 
 # ============================================
 # SIGNUP GATE (BEFORE ANYTHING ELSE)
@@ -120,6 +130,15 @@ for i, t in enumerate(tickers_list):
     )
     weights.append(w)
 
+st.sidebar.subheader("Optimizer Settings")
+lower_limit = st.sidebar.number_input(
+    "Min weight per asset (%)",
+    min_value=0.0,
+    max_value=100.0,
+    value=5.0,
+    step=1.0,
+)
+
 st.session_state["current_weights_pct"] = weights.copy()
 
 if st.session_state["loaded_weights"] is not None:
@@ -175,8 +194,8 @@ risk_free = st.sidebar.number_input(
 # ============================================
 # TABS
 # ============================================
-tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer, tab_frontier = st.tabs(
-    ["📊 Overview", "⚠️ Risk", "📈 Benchmark", "🎲 Monte Carlo", "🔧 Optimizer", "🏔️ Efficient Frontier"]
+tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer, tab_frontier, tab_ai = st.tabs(
+    ["📊 Overview", "⚠️ Risk", "📈 Benchmark", "🎲 Monte Carlo", "🔧 Optimizer", "🏔️ Efficient Frontier", "🤖 AI Analysis"]
 )
 # ============================================
 # OVERVIEW TAB
@@ -340,8 +359,8 @@ with tab_risk:
     st.subheader("🔄 Rolling Risk (Volatility & Sharpe)")
     st.caption("Rolling metrics show **how risk and performance change over time**.")
 
-    st.sidebar.subheader("🔍 Rolling Window Settings")
-    window = st.sidebar.slider(
+    st.subheader("🔍 Rolling Window Settings")
+    window = st.slider(
         "Rolling window (trading days)",
         min_value=20,
         max_value=252,
@@ -395,9 +414,8 @@ with tab_risk:
 # ============================================
 with tab_benchmark:
     st.header("📊 Portfolio vs Benchmark")
-    st.sidebar.subheader("📌 Benchmark Comparison")
 
-    benchmark_symbol = st.sidebar.selectbox(
+    benchmark_symbol = st.selectbox(
         "Select benchmark index:",
         ("^NSEI", "^GSPC", "^NDX", "^BSESN"),
         index=0
@@ -575,14 +593,6 @@ with tab_monte:
 # ============================================
 # OPTIMIZER TAB
 # ============================================
-st.sidebar.subheader("Optimizer Settings")
-lower_limit = st.sidebar.number_input(
-    "Min weight per asset (%)",
-    min_value=0.0,
-    max_value=100.0,
-    value=5.0,
-    step=1.0,
-)
 
 with tab_optimizer:
     st.header("🔧 Portfolio Optimizer")
@@ -707,9 +717,7 @@ with tab_optimizer:
                 st.toast("✅ Optimized weights applied!", icon="✅")
                 st.rerun()
 
-# ============================================
-# EFFICIENT FRONTIER TAB
-# ============================================
+
 # ============================================
 # EFFICIENT FRONTIER TAB
 # ============================================
@@ -1174,6 +1182,127 @@ with tab_frontier:
     else:
         st.info("👆 Click '🚀 Generate Efficient Frontier' to visualize your portfolio's position in the risk-return landscape.")
 # ============================================
+# ============================================
+# AI INSIGHTS DATA COLLECTION
+# ============================================
+
+# Collect all portfolio data for AI analysis
+# ============================================
+# AI INSIGHTS DATA COLLECTION
+# ============================================
+
+# Collect all portfolio data for AI analysis
+try:
+    # Get benchmark data if available
+    alpha_value = None
+    beta_value = None
+    benchmark_name = None
+    
+    # Check if benchmark was calculated
+    if 'benchmark_returns' in locals() and benchmark_returns is not None:
+        aligned_df = pd.concat([portfolio_return, benchmark_returns], axis=1).dropna()
+        aligned_df.columns = ["Portfolio", "Benchmark"]
+        aligned_cumulative = (1 + aligned_df).cumprod()
+        
+        portfolio_total = aligned_cumulative.iloc[-1]["Portfolio"] - 1
+        benchmark_total = aligned_cumulative.iloc[-1]["Benchmark"] - 1
+        alpha_value = (portfolio_total - benchmark_total) * 100
+        beta_value = portfolio_beta(aligned_df["Portfolio"], aligned_df["Benchmark"])
+        benchmark_name = benchmark_names.get(benchmark_symbol, "Benchmark") if 'benchmark_symbol' in locals() else None
+    
+    # Get optimizer data if available
+    current_sharpe_value = None
+    optimized_sharpe_value = None
+    
+    if "opt_stats" in st.session_state:
+        opt_ret, opt_vol, opt_sharpe = st.session_state["opt_stats"]
+        manual_weights_array = np.array(weights)
+        mean_returns_opt = returns.mean() * 252
+        cov_matrix_opt = returns.cov() * 252
+        manual_ret, manual_vol, manual_sharpe = portfolio_stats(
+            manual_weights_array, mean_returns_opt, cov_matrix_opt, risk_free
+        )
+        current_sharpe_value = manual_sharpe
+        optimized_sharpe_value = opt_sharpe
+    
+    # Get frontier data if available
+    frontier_position = None
+    optimal_improvement_value = None
+    target_risk_value = None  # ✅ NEW
+    
+    if 'frontier_data' in st.session_state:
+        frontier_current = st.session_state['frontier_data']['current']
+        frontier_optimal = st.session_state['frontier_data'].get('optimal_at_risk')
+        frontier_params = st.session_state['frontier_data'].get('params', {})
+        
+        target_risk_value = frontier_params.get('target_risk')  # ✅ NEW
+        
+        if frontier_optimal is not None:
+            current_return = frontier_current['return']
+            optimal_return = frontier_optimal['return']
+            
+            if abs(current_return - optimal_return) <= 0.005:
+                frontier_position = "on"
+            elif current_return < optimal_return:
+                frontier_position = "below"
+            else:
+                frontier_position = "above"
+            
+            optimal_improvement_value = (optimal_return - current_return) * 100
+    
+    # ✅ NEW: Get Monte Carlo data if available
+    monte_p5 = None
+    monte_p50 = None
+    monte_p95 = None
+    monte_days = None
+    
+    if 'sim_results' in locals() and sim_results is not None:
+        final_values = sim_results[-1, :]
+        monte_p5 = np.percentile(final_values, 5)
+        monte_p50 = np.percentile(final_values, 50)
+        monte_p95 = np.percentile(final_values, 95)
+        monte_days = num_days if 'num_days' in locals() else None
+    
+    # Collect all data
+    ai_portfolio_data = collect_portfolio_data(
+        tickers_list=tickers_list,
+        weights=weights,
+        start_date=start_date,
+        end_date=end_date,
+        metrics=metrics,
+        returns_data=returns,
+        alpha=alpha_value,
+        beta=beta_value,
+        benchmark_label=benchmark_name,
+        current_sharpe=current_sharpe_value,
+        optimized_sharpe=optimized_sharpe_value,
+        frontier_position=frontier_position,
+        optimal_improvement=optimal_improvement_value,
+        target_risk=target_risk_value,  # ✅ NEW
+        monte_carlo_p5=monte_p5,  # ✅ NEW
+        monte_carlo_p50=monte_p50,  # ✅ NEW
+        monte_carlo_p95=monte_p95,  # ✅ NEW
+        monte_carlo_days=monte_days  # ✅ NEW
+    )
+    
+except Exception as e:
+    st.error(f"Error collecting AI data: {str(e)}")
+    ai_portfolio_data = None
+
+if 'metrics' in locals() and ai_portfolio_data is not None:
+    render_sidebar_summary(ai_portfolio_data)
+
+# ============================================
+# AI ANALYSIS TAB
+# ============================================
+with tab_ai:
+    if ai_portfolio_data is not None:
+        render_full_analysis_tab(ai_portfolio_data)
+    else:
+        st.warning("⚠️ Unable to generate AI analysis. Please ensure portfolio data is loaded.")
+        st.info("💡 Make sure you have:\n- Selected tickers\n- Set weights (totaling 100%)\n- Portfolio data downloaded successfully")
+
+# ============================================
 # SIDEBAR: SAVE/LOAD PORTFOLIOS
 # ============================================
 st.sidebar.markdown("---")
@@ -1431,7 +1560,7 @@ st.markdown(
     Market data is sourced from third‑party providers and may be delayed or contain errors. We do not guarantee the accuracy of this data.
     <br><br>
     <strong>3. Educational Use Only</strong><br>
-    All charts and metrics are for illustrative purposes only. They should not be interpreted as financial advice or guarantees of future outcomes.
+    All charts, metrics and AI insights are for educational purposes only. They should not be interpreted as financial advice or guarantees of future outcomes.
     </div>
     </details>
     </div>

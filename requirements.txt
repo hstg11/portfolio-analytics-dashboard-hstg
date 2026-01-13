@@ -4,7 +4,12 @@ yfinance
 matplotlib
 plotly
 streamlit
-scipy
 streamlit-cookies-manager
 gspread
 oauth2client
+altair
+scipy
+google-auth
+python-dotenv
+google-generativeai
+edge-tts  # ✅ Added (replaces gTTS)

@@ -144,24 +144,27 @@ def get_efficient_frontier_curve(
 ):
     """
     Generate points along the efficient frontier curve.
-    Finds minimum volatility portfolio for each target return level.
+    Uses true min/max returns for deterministic frontier.
     """
-    # First generate random portfolios to find return range
-    random_portfolios = generate_random_portfolios(
-        mean_returns, cov_matrix, risk_free, 1000, lower_limit
+    
+    # ✅ Call your existing get_min_volatility_portfolio function
+    from optimizer import get_min_volatility_portfolio  # Import if needed
+    
+    opt_weights, ret, vol, sharpe = get_min_volatility_portfolio(
+        mean_returns, cov_matrix, risk_free, lower_limit
     )
     
-    min_return = random_portfolios['return'].min()
-    max_return = random_portfolios['return'].max()
+    # Use this as min return
+    min_return = ret
+    max_return = mean_returns.max()
     
-    # Create target returns spanning the range
+    # Rest stays the same...
     target_returns = np.linspace(min_return, max_return, num_points)
     
     efficient_portfolios = []
     
     for target_ret in target_returns:
         try:
-            # Optimize: minimize volatility for this target return
             result = minimize_volatility_for_target_return(
                 mean_returns,
                 cov_matrix,
@@ -182,11 +185,9 @@ def get_efficient_frontier_curve(
                     'weights': weights
                 })
         except:
-            # Skip if optimization fails for this target
             continue
     
     return pd.DataFrame(efficient_portfolios)
-
 
 def minimize_volatility_for_target_return(
     mean_returns,

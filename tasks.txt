@@ -2,35 +2,31 @@
 2. Indian Stock Help (15 min) ✅ 
 3. Stock Corelation matrix ✅
 4. Min Volatility (30 min) ✅
+5. Efficient Frontier ✅
+6.free LLM API driven Insight Panels ✅
+
+
+Notes: 
+
+To be sent for testing:
+    Changes
+    ReadMe + Security checks(Passwords, API key)
 
 
 
-7. Efficient Frontier 
-8. Educational Tooltips 
+ V2- 40 to 50 hours
+ Fama French Factor Exposure
+ Risk Attribution MCTR
+ Return Attribution
+ Stress testing
+ 🖨️ Export Report: A button to download a PDF or CSV summary.
 
-Notes:
-🏔️ The Efficient Frontier: The "Hedge Fund" scatter plot.
-user inputable risk bar
-Generate 2,000+ random portfolios.
-Plot Risk vs. Return scatter plot.
-Draw the "Frontier Curve" to show the user where their portfolio sits relative to the market potential.
 
-✅ 1️⃣ free LLM API driven Insight Panels 
 
-Add short, human-readable interpretations:
-Walk through how covariance pushes TSLA weight to zero sometimes(explain to me and add to UI)
-“Your portfolio takes X% risk to earn Y% return.”
-“Drawdowns show pain periods — largest was ___.”
-“Sharpe above 1 = strong risk-adjusted returns.”
-
-Makes the tool feel like a PM explaining the results.
-
-___
 
 
 Very optional rn:
 📱 Mobile Compatibility: Ensure charts and tables don't break on small screens.
-🖨️ Export Report: A button to download a PDF or CSV summary.
 ⏱️ Screen Time Tracking: Measure session duration.
 Calculate session_end_time - session_start_time.
 Update the users sheet with a "Minutes Spent" metric.
