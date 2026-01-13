@@ -31,8 +31,8 @@ import streamlit as st
 # -------------------------------
 # We look for the keys exactly as named in your secrets
 gemini_key_names = ["GEMINI_API_KEY", "GEMINI_API_KEY2", "GEMINI_API_KEY3"]
-API_KEYS = [st.secrets[k] for k in gemini_key_names if k in st.secrets]
-
+# Only use this if you DON'T move the keys to the top
+API_KEYS = [st.secrets["gcp_service_account"].get(k) for k in gemini_key_names]
 if not API_KEYS:
     st.error("No Gemini API keys found at the root level of Secrets.")
     st.stop()
