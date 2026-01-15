@@ -33,7 +33,7 @@ Thumbs.db
 .env.local
 
 # Local test files
-notes.txt
+tasks.txt
 test_*.py
 
 # Logs

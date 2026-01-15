@@ -1381,7 +1381,7 @@ try:
                 st.rerun()
         
         with col_delete:
-            if st.button("🗑️ Delete", use_container_width=True):
+            if st.button("Delete", use_container_width=True):
                 st.session_state["deleting_portfolio"] = selected_portfolio["portfolio_id"]
                 st.rerun()
         
