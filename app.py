@@ -109,7 +109,7 @@ if len(tickers_list) != st.session_state["last_ticker_count"]:
     st.session_state["last_ticker_count"] = len(tickers_list)
     st.session_state["current_weights_pct"] = None  # Force equal weights
 
-st.sidebar.info("""Input Guide for Indian Stocks - NSE stocks → (Ticker + `.NS`) , e.g. `RELIANCE.NS`, `INFY.NS`, `TCS.NS`""")
+st.sidebar.info("""Input Guide for Indian Stocks - NSE stocks → (Ticker + `.NS(NSE) or .BO(BSE)`) , e.g. `500325.BO(Reliance)`, `INFY.NS`, `TCS.NS`.""")
 
 
 # Weight sliders - reads from loaded portfolio
@@ -236,6 +236,7 @@ with tab_overview:
     st.altair_chart(chart, use_container_width=False)
 
     st.subheader("📊 Daily Returns")
+    st.dataframe(data.tail())
     returns = data.pct_change().dropna()
     st.dataframe(returns.tail().style.format("{:.2%}"))
 
@@ -612,6 +613,9 @@ with tab_optimizer:
     mean_returns = returns.mean() * 252
     cov_matrix = returns.cov() * 252
 
+    # ✅ FIX: Ensure tickers_list matches mean_returns.index order
+    tickers_list_sorted = mean_returns.index.tolist()
+
     # --- 2. Strategy Selection ---
     goal = st.radio(
         "Optimization Goal:",
@@ -632,6 +636,7 @@ with tab_optimizer:
         # Save results
         st.session_state["opt_weights"] = opt_weights_calc
         st.session_state["opt_stats"] = (ret, vol, sharpe)
+        st.session_state["opt_tickers_order"] = tickers_list_sorted  # ✅ Store the order
         st.rerun()
 
     # --- 3. Display Results ---
@@ -803,9 +808,12 @@ with tab_frontier:
                 lower_limit=lower_limit,
                 num_points=50
             )
-            
-            # Calculate current portfolio position
+                        # Calculate current portfolio position
             current_weights = np.array(weights)
+
+            # ✅ FIX: Get ticker order from returns dataframe (matches mean_returns order)
+            tickers_for_display = returns.columns.tolist()
+
             current_return = portfolio_return_opt(current_weights, mean_returns)
             current_vol = portfolio_volatility_opt(current_weights, cov_matrix)
             current_sharpe = (current_return - risk_free) / current_vol if current_vol != 0 else 0.0
@@ -1067,8 +1075,9 @@ with tab_frontier:
             optimal_weights = optimal_at_risk['weights']
             
             # Create comparison table
+# Create comparison table
             weights_comparison = pd.DataFrame({
-                'Asset': tickers_list,
+                'Asset': returns.columns.tolist(),                
                 'Current Weight (%)': (current['weights'] * 100).round(2),
                 'Optimal Weight (%)': (optimal_weights * 100).round(2),
                 'Change (%)': ((optimal_weights - current['weights']) * 100).round(2)
@@ -1457,6 +1466,14 @@ if st.sidebar.button("💾 Save Portfolio Snapshot"):
     except Exception as e:
         st.sidebar.error(f"Error: {e}")
 
+
+st.sidebar.markdown("---")
+if st.session_state.get("user_email"):
+    st.sidebar.caption(f"👤 {st.session_state['user_email']}")
+
+if st.sidebar.button("🚪 Logout", use_container_width=True, type="secondary"):
+    logout(cookies)
+
 # ============================================
 # FOOTER & DISCLAIMER (Shifted Up)
 # ============================================
@@ -1482,7 +1499,7 @@ st.markdown(
         pointer-events: none;
     }
     </style>
-    <div class="footer">Harbhajan The Great</div>
+    <div class="footer">HSTG@FT</div>
     """,
     unsafe_allow_html=True
 )

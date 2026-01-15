@@ -223,9 +223,10 @@ PORTFOLIO DATA:
 - Max Drawdown: {data['max_drawdown']}% | VaR(95%): {data['var_95']}%
 - Correlation: {data['correlation_context']}
 
-TASK: Write EXACTLY 180-200 words covering:
+TASK: Write EXACTLY 200-220 words covering:
 
 **Portfolio Composition (90-100 words)**
+- Asset actual names not just tickers
 - Portfolio classification: growth/value/sector-focused?
 - Concentration risk from {data['dominant_asset']}
 - Correlation dynamics: {data['correlation_context']}

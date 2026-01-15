@@ -7,10 +7,23 @@
 
 
 Notes: 
-ReadMe
+Phase 1: Testing (NOW - 2 days)
+├─ Friends test app
+└─ You fix bugs if any
 
+Phase 2: Polish (Day 3)
+├─ Add Google Analytics
+├─ Write README
+└─ Create CHANGELOG.md
 
+Phase 3: Launch (Day 4)
+├─ Make repo public on GitHub
+└─ Post on LinkedIn
 
+DONE! 🎉
+
+delete portfolio
+email change
  V2- 40 to 50 hours
  Fama French Factor Exposure
  Risk Attribution MCTR

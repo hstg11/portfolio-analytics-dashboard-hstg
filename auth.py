@@ -364,13 +364,22 @@ def show_signup_gate(users_df, users_ws, cookies):
 
 def logout(cookies):
     """Handle user logout"""
-    if "user_email" in cookies:
-        cookies.delete("user_email")
-        cookies.save()
+    # Clear cookie by setting to empty string
+    cookies["user_email"] = ""
+    cookies.save()
     
+    # Clear session state
     st.session_state["signed_up"] = False
     st.session_state["user_email"] = None
     st.session_state["last_seen_updated"] = False
+    
+    # Clear AI analysis cache
+    if "ai_quick_summary" in st.session_state:
+        st.session_state["ai_quick_summary"] = None
+    if "ai_full_analysis" in st.session_state:
+        st.session_state["ai_full_analysis"] = None
+    if "ai_analysis_generated" in st.session_state:
+        st.session_state["ai_analysis_generated"] = False
     
     st.rerun()
 
