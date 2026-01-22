@@ -14,17 +14,20 @@ from AI_insights import *
 st.set_page_config(layout="wide")
 
 # ============================================
-# HELPER: TICKER TO COMPANY NAME MAPPING
+# HELPER: TICKER TO COMPANY NAME MAPPING (with Rate Limit Handling)
 # ============================================
 @st.cache_data(ttl=86400)  # Cache for 24 hours
-def get_stock_names(tickers_list):
+def get_stock_name_single(ticker: str) -> str:
     """
-    Fetch company names for tickers using yfinance
-    Returns dict: {ticker: name}
+    Fetch a single company name with exponential backoff retry.
+    Returns the company name or ticker if fetch fails.
     """
-    ticker_to_name = {}
+    import time
     
-    for ticker in tickers_list:
+    max_retries = 3
+    base_delay = 0.5  # Start with 500ms delay
+    
+    for attempt in range(max_retries):
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
@@ -33,17 +36,44 @@ def get_stock_names(tickers_list):
             name = (
                 info.get('longName') or 
                 info.get('shortName') or 
-                ticker  # Fallback to ticker if name not found
+                ticker
             )
             
             # Shorten very long names
             if len(name) > 30:
                 name = name[:27] + "..."
             
-            ticker_to_name[ticker] = name
-        except:
-            # If fetch fails, use ticker as name
-            ticker_to_name[ticker] = ticker
+            return name
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Check for rate limit errors
+            if "429" in str(e) or "rate" in error_msg or "throttle" in error_msg:
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 0.5s, 1s, 2s
+                    delay = base_delay * (2 ** attempt)
+                    time.sleep(delay)
+                    continue
+            
+            # For other errors or final attempt, return ticker as fallback
+            return ticker
+    
+    # All retries exhausted
+    return ticker
+
+
+def get_stock_names(tickers_list):
+    """
+    Fetch company names for multiple tickers with rate limit handling.
+    Uses individual caching per ticker to avoid total failure.
+    Returns dict: {ticker: name}
+    """
+    ticker_to_name = {}
+    
+    for ticker in tickers_list:
+        # Call cached function for each ticker (benefits from cache)
+        ticker_to_name[ticker] = get_stock_name_single(ticker)
     
     return ticker_to_name
 
@@ -322,7 +352,10 @@ with tab_overview:
     st.subheader("📊 Latest Returns")
     
     # Logic for the Data Table
-    returns = data.pct_change().dropna()
+    returns_full = data.pct_change().dropna()
+    
+    # ✅ Skip first return row (transition from extra day we fetched for calculation accuracy)
+    returns = returns_full.iloc[1:] if len(returns_full) > 1 else returns_full
     
     if not returns.empty:
         # ✅ FIX: Rename columns from Tickers to Company Names for the table
