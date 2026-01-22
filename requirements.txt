@@ -7,10 +7,10 @@ streamlit==1.19.0
 streamlit-cookies-manager==0.2.0
 gspread==6.2.1
 oauth2client==4.1.3
-altair==4.2.0        # ✅ Downgraded for Streamlit compatibility
-scipy==1.13.1
-google-auth==2.29.0
+altair==4.2.0
+scipy==1.12.0          # avoids Fortran build issue
+google-auth==2.47.0    # upgraded for compatibility
 python-dotenv==1.0.1
-google-generativeai==0.8.6
 edge-tts==7.2.7
-google-genai==1.59.0
+google-genai==1.59.0   # keep only one of these
+# google-generativeai==0.8.6  # remove if not needed
