@@ -1,4 +1,3 @@
-python-3.11.9
 pandas==2.2.3
 numpy==1.26.4
 yfinance==0.2.50
@@ -9,7 +8,7 @@ streamlit-cookies-manager==0.2.0
 gspread==6.2.1
 oauth2client==4.1.3
 altair==4.2.0
-google-auth==2.47.0    # upgraded for compatibility
+google-auth==2.47.0
 python-dotenv==1.0.1
 edge-tts==7.2.7
-google-genai==1.59.0   # keep only one of these
+google-genai==1.59.0
