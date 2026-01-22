@@ -1,8 +1,8 @@
-# 📊 Portfolio Analytics Dashboard — Risk, Optimization, Efficient Frontier & AI Insights (Streamlit)
+# 📊 Portfolio Analytics Dashboard — Risk, Monte Carlo, Optimization, Efficient Frontier & AI Insights (Streamlit)
 
 A production-style **Portfolio Analytics Dashboard** built with **Python + Streamlit**, aimed at **quant-enabled portfolio analysis** and **equity research workflows**.
 
-Users can input a stock portfolio (US + NSE tickers supported), analyze performance + risk, compare with benchmarks, run Monte Carlo simulations, optimize allocations using **Markowitz Mean–Variance (MPT)**, visualize the **Efficient Frontier**, and generate **AI-driven portfolio insights** (educational only).
+Users can input a portfolio, analyze performance + risk, compare with benchmarks, run Monte Carlo simulations, optimize allocations using **Markowitz Mean–Variance (MPT)**, visualize the **Efficient Frontier**, and generate **AI-driven portfolio insights** (educational only).
 
 ---
 
