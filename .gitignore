@@ -42,3 +42,11 @@ test_*.py
 # Docker
 .devcontainer/
 
+.env
+.env.*
+.streamlit/secrets.toml
+*.json
+venv/
+.venv/
+__pycache__/
+*.pyc

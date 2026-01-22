@@ -1,16 +1,17 @@
-pandas
-numpy
-yfinance
-matplotlib
-plotly
-streamlit
-streamlit-cookies-manager
-gspread
-oauth2client
-altair
-scipy
-google-auth
-python-dotenv
-google-generativeai
-edge-tts  # ✅ Added (replaces gTTS)
-google-genai
+pandas==2.2.3
+numpy==1.26.4
+yfinance==0.2.50
+matplotlib==3.8.4
+plotly==5.24.1
+streamlit==1.19.0
+streamlit-cookies-manager==0.2.0
+gspread==6.2.1
+oauth2client==4.1.3
+altair==4.2.0        # ✅ Downgraded for Streamlit compatibility
+scipy==1.13.1
+google-auth==2.29.0
+python-dotenv==1.0.1
+google-generativeai==0.8.6
+edge-tts==7.2.7
+google-genai==1.59.0
+datetime

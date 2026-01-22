@@ -269,9 +269,11 @@ def show_signup_gate(users_df, users_ws, cookies):
         
         st.rerun()
     
-    # Show signup form
-    st.title("🔐 Welcome – Please Sign Up")
-    st.write("Please fill in your details to access the portfolio dashboard.")
+    # Show signup form    
+    st.title("🔐 Welcome to Portfolio Analytics")
+    st.write("Sign in to access advanced portfolio analysis tools")
+    
+    # ... rest of signup form ...
     
     with st.form("signup_form", clear_on_submit=False):
         col1, col2 = st.columns(2)

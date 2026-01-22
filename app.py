@@ -14,6 +14,40 @@ from AI_insights import *
 st.set_page_config(layout="wide")
 
 # ============================================
+# HELPER: TICKER TO COMPANY NAME MAPPING
+# ============================================
+@st.cache_data(ttl=86400)  # Cache for 24 hours
+def get_stock_names(tickers_list):
+    """
+    Fetch company names for tickers using yfinance
+    Returns dict: {ticker: name}
+    """
+    ticker_to_name = {}
+    
+    for ticker in tickers_list:
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            # Try different name fields (yfinance inconsistent)
+            name = (
+                info.get('longName') or 
+                info.get('shortName') or 
+                ticker  # Fallback to ticker if name not found
+            )
+            
+            # Shorten very long names
+            if len(name) > 30:
+                name = name[:27] + "..."
+            
+            ticker_to_name[ticker] = name
+        except:
+            # If fetch fails, use ticker as name
+            ticker_to_name[ticker] = ticker
+    
+    return ticker_to_name
+
+# ============================================
 # INITIALIZE SERVICES
 # ============================================
 cookies = init_cookie_manager()
@@ -44,7 +78,7 @@ if "loaded_weights" not in st.session_state:
 
 # Persistent portfolio state
 if "current_tickers" not in st.session_state:
-    st.session_state["current_tickers"] = "AAPL,MSFT,AMZN,META,GOOG"
+    st.session_state["current_tickers"] = "500034.BO,500520.bo,INFY.NS, ITC.NS, SBIN.NS, DRREDDY.NS, ETERNAL.NS, 500325.BO, 500696.BO"
 
 if "current_weights_pct" not in st.session_state:
     st.session_state["current_weights_pct"] = None
@@ -87,9 +121,38 @@ tickers = st.sidebar.text_input(
 )
 
 st.session_state["current_tickers"] = tickers
+import datetime
 
-start_date = st.sidebar.date_input("Start Date", value=pd.to_datetime("2020-01-01"))
-end_date = st.sidebar.date_input("End Date", value=pd.to_datetime("today"))
+# Get today's date
+today = datetime.date.today()
+
+# Date inputs with max_value constraint
+start_date = st.sidebar.date_input(
+    "Start Date", 
+    value=pd.to_datetime("2018-01-01").date(),
+    max_value=today  # ✅ Cannot select future
+)
+
+end_date = st.sidebar.date_input(
+    "End Date", 
+    value=today,
+    min_value=start_date,  # ✅ Must be after start_date
+    max_value=today  # ✅ Cannot select future
+)
+
+# ✅ Additional validation
+if end_date < start_date:
+    st.sidebar.error("❌ End date must be after start date")
+    st.stop()
+
+if end_date == start_date:
+    st.sidebar.warning("⚠️ Start and end dates are the same. Need at least 2 days of data.")
+    st.stop()
+
+# ✅ Check minimum data range
+date_diff = (end_date - start_date).days
+if date_diff < 30:
+    st.sidebar.warning(f"⚠️ Only {date_diff} days selected. Recommend at least 30 days for meaningful analysis.")
 
 def validate_ticker(ticker: str) -> bool:
     """Basic ticker validation"""
@@ -211,6 +274,9 @@ tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer, tab_frontier, t
 # ============================================
 # OVERVIEW TAB
 # ============================================
+# ============================================
+# OVERVIEW TAB
+# ============================================
 with tab_overview:
     st.subheader("📈 Price History")
     data = raw["Close"]
@@ -221,28 +287,55 @@ with tab_overview:
     data = data.dropna()
     data = data[data.index >= pd.to_datetime(start_date)]
 
+    # Fetch names
+    ticker_names = get_stock_names(tickers_list)
+
+    # Prepare chart data
     price_df = data.reset_index().melt('Date', var_name='Ticker', value_name='Price')
+    price_df['Company'] = price_df['Ticker'].map(ticker_names)
 
     chart = (
         alt.Chart(price_df)
         .mark_line()
         .encode(
             x=alt.X('Date:T', axis=alt.Axis(format='%b %Y', labelAngle=0, labelOverlap=True)),
-            y=alt.Y('Price:Q'),
-            color=alt.Color('Ticker:N', legend=alt.Legend(orient='bottom', title=None))
+            y=alt.Y('Price:Q', title="Price"),
+            # Use Company name for color and legend
+            color=alt.Color('Company:N', legend=alt.Legend(
+                orient='bottom', 
+                title=None,
+                columns=6, # ✅ Forces legend into multiple rows if many tickers
+                symbolType='stroke'
+            )),
+            tooltip=['Date:T', 'Company:N', 'Ticker:N', 'Price:Q']
         )
-        .properties(height=420, width=1000)
+        .properties(height=400)
     )
-    st.altair_chart(chart, use_container_width=False)
+    st.altair_chart(chart, use_container_width=True)
 
-    st.subheader("📊 Daily Returns")
-    st.dataframe(data.tail())
+    # 2. Last 5 Days Prices Table
+    st.subheader("📊 Last 5 Days: Closing Prices")
+    price_display = data.tail().copy()
+    # Rename columns to Company Names
+    price_display.columns = [ticker_names.get(t, t) for t in price_display.columns]
+    st.dataframe(price_display, use_container_width=True)
+    st.subheader("📊 Latest Returns")
+    
+    # Logic for the Data Table
     returns = data.pct_change().dropna()
-    st.dataframe(returns.tail().style.format("{:.2%}"))
-
-if returns.empty:
-    st.warning("No price data available for the selected tickers/date range.")
-    st.stop()
+    
+    if not returns.empty:
+        # ✅ FIX: Rename columns from Tickers to Company Names for the table
+        returns_display = returns.tail().copy()
+        returns_display.columns = [ticker_names.get(t, t) for t in returns_display.columns]
+        
+        # Formatting for percentage display
+        returns_formatted = returns_display.style.format(lambda x: f"{x:.2%}")
+        
+        st.dataframe(returns_formatted, use_container_width=True)
+    else:
+        st.warning("No price data available for the selected tickers/date range.")
+        st.stop()
 
 if returns.shape[1] != len(weights):
     weights = np.repeat(1/returns.shape[1], returns.shape[1])
@@ -331,42 +424,73 @@ with tab_risk:
             value_name="Correlation",
         )
 
+        # Get company names
+        ticker_names = get_stock_names(corr_matrix.index.tolist())
+
+        # Map tickers to names in correlation dataframe
+        corr_df['Company1'] = corr_df['Ticker1'].map(ticker_names)
+        corr_df['Company2'] = corr_df['Ticker2'].map(ticker_names)
+
+        # Build heatmap
         # Build heatmap
         heatmap = (
             alt.Chart(corr_df)
             .mark_rect()
             .encode(
-                x=alt.X("Ticker1:N", sort=None, title=None, axis=alt.Axis(labelAngle=0)),
-                y=alt.Y("Ticker2:N", sort=None, title=None),
-                color=alt.Color("Correlation:Q",
-                                scale=alt.Scale(scheme="redgrey", domain=[-1, 1])),
+                x=alt.X(
+                    "Company1:N", 
+                    sort=None, 
+                    title=None, 
+                    axis=alt.Axis(
+                        labelAngle=-45,      # ✅ Slanted for easier reading
+                        labelOverlap=False,   # ✅ Ensures no labels are skipped
+                        labelLimit=150        # ✅ Prevents long names from cutting off early
+                    )
+                ),
+                y=alt.Y("Company2:N", sort=None, title=None),
+                color=alt.Color(
+                    "Correlation:Q",
+                    scale=alt.Scale(scheme="redgrey", domain=[-1, 1]),
+                    legend=alt.Legend(title="Correlation")
+                ),
                 tooltip=[
-                    alt.Tooltip("Ticker1:N", title="Asset A"),
-                    alt.Tooltip("Ticker2:N", title="Asset B"),
+                    alt.Tooltip("Company1:N", title="Asset A"),
+                    alt.Tooltip("Ticker1:N", title="Ticker A"),
+                    alt.Tooltip("Company2:N", title="Asset B"),
+                    alt.Tooltip("Ticker2:N", title="Ticker B"),
                     alt.Tooltip("Correlation:Q", format=".2f"),
                 ],
             )
-            .properties(width=500, height=500, title="Correlation heatmap")
+            .properties(
+                width=alt.Step(60), # ✅ Fixed column width ensures labels have room
+                height=500, 
+                title="Correlation Heatmap"
+            )
         )
 
-        # Overlay labels
+        # Build labels (the numbers inside the boxes)
         labels = (
             alt.Chart(corr_df)
-            .mark_text(baseline="middle", align="center", fontSize=13)
+            .mark_text(baseline="middle", align="center", fontSize=12)
             .encode(
-                x="Ticker1:N",
-                y="Ticker2:N",
+                x="Company1:N",
+                y="Company2:N",
                 text=alt.Text("Correlation:Q", format=".2f"),
                 color=alt.condition(
-                    "datum.Correlation > 0.7 || datum.Correlation < -0.7",
+                    "datum.Correlation > 0.6 || datum.Correlation < -0.6",
                     alt.value("white"),
                     alt.value("black")
                 )
             )
         )
 
-        st.altair_chart(heatmap + labels, use_container_width=True)
+        # Combine and apply final axis configuration
+        final_chart = (heatmap + labels).configure_axis(
+            labelFontSize=11,
+            titleFontSize=13
+        )
 
+        st.altair_chart(final_chart, use_container_width=True)
     
     st.subheader("🔄 Rolling Risk (Volatility & Sharpe)")
     st.caption("Rolling metrics show **how risk and performance change over time**.")
@@ -668,7 +792,12 @@ with tab_optimizer:
                 "Manual": [f"{manual_ret*100:.2f}%", f"{manual_vol*100:.2f}%", f"{manual_sharpe:.2f}"],
                 "Optimized": [f"{opt_ret*100:.2f}%", f"{opt_vol*100:.2f}%", f"{opt_sharpe:.2f}"]
             }, index=[1, 2, 3])
-            st.table(compare_df)
+
+            # Convert to strings explicitly to prevent auto-formatting
+            compare_df["Manual"] = compare_df["Manual"].astype(str)
+            compare_df["Optimized"] = compare_df["Optimized"].astype(str)
+
+            st.dataframe(compare_df, use_container_width=True, hide_index=True)
 
             # --- Charts (unchanged) ---
                         # cumulative returns chart
@@ -686,7 +815,7 @@ with tab_optimizer:
                 "Optimized Portfolio": opt_cum
             }).melt("Date", var_name="Portfolio", value_name="Growth Index")
             perf_chart = alt.Chart(perf_df).mark_line().encode(
-                x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', title=None)),
+                x=alt.X("Date:T", axis=alt.Axis(format='%b %Y', title=None, labelAngle=0)),
                 y=alt.Y("Growth Index:Q", scale=alt.Scale(zero=False)),
                 color=alt.Color("Portfolio:N", scale=alt.Scale(
                     domain=['Manual Portfolio', 'Optimized Portfolio'], 
@@ -697,33 +826,60 @@ with tab_optimizer:
             st.altair_chart(perf_chart, use_container_width=True)
             st.caption("This chart shows **historical backtested performance** based on your chosen period. It is not a forecast.")
 
-            # weight allocation chart
+            # Get company names
+            ticker_names = get_stock_names(tickers_list)
+
             alloc_df = pd.DataFrame({
                 "Ticker": tickers_list,
+                "Company": [ticker_names[t] for t in tickers_list],
                 "Manual": manual_weights_array * 100,
                 "Optimized": opt_weights_display * 100
-            }).melt("Ticker", var_name="Type", value_name="Weight (%)")
+            })
 
-            alloc_chart = alt.Chart(alloc_df).mark_bar().encode(
-                x=alt.X("Ticker:N", title=None, sort=None, axis=alt.Axis(labelAngle=0)),
-                y=alt.Y("Weight (%):Q"),
-                color=alt.Color("Type:N", scale=alt.Scale(
-                    domain=['Manual', 'Optimized'], 
-                    range=['#cccccc', '#4ade80']
-                )),
-                xOffset="Type:N",
-                tooltip=["Ticker", "Type", alt.Tooltip("Weight (%)", format=".1f")]
-            ).properties(height=350)
-            
+            # Melt while keeping both Ticker and Company
+            alloc_df_melted = alloc_df.melt(
+                id_vars=["Ticker", "Company"], 
+                var_name="Type", 
+                value_name="Weight (%)"
+            )
+
+            alloc_chart = alt.Chart(alloc_df_melted).mark_bar().encode(
+            x=alt.X(
+                "Company:N", 
+                title=None, 
+                sort=None, 
+                axis=alt.Axis(
+                    labelAngle=-45,      # ✅ Easy to read slant
+                    labelOverlap=False,   # ✅ Show all company names
+                    labelLimit=150        # ✅ Prevents cutting off long names
+                )
+            ),
+            y=alt.Y("Weight (%):Q", title="Weight (%)"),
+            color=alt.Color("Type:N", scale=alt.Scale(
+                domain=['Manual', 'Optimized'], 
+                range=['#cccccc', '#4ade80']
+            )),
+            xOffset="Type:N",
+            tooltip=["Company:N", "Ticker:N", "Type:N", alt.Tooltip("Weight (%)", format=".1f")]
+        ).properties(
+            height=350,
+            width=alt.Step(80)  # ✅ Adds horizontal breathing room per bar group
+        )
+                        
             st.altair_chart(alloc_chart, use_container_width=True)
 
             # weights table
             st.subheader("Optimized Portfolio Weights")
+
+            # Get company names
+            ticker_names = get_stock_names(mean_returns.index.tolist())
+
             opt_df = pd.DataFrame({
-                "Asset": mean_returns.index,
+                "Company": [ticker_names[t] for t in mean_returns.index],
+                "Ticker": mean_returns.index,
                 "Weight %": (opt_weights_display * 100).round(2)
             })
-            st.dataframe(opt_df, hide_index=True)
+            st.dataframe(opt_df, hide_index=True, use_container_width=True)
 
             # apply button
             if st.button("✅ Apply These Weights", type="primary"):
@@ -1075,14 +1231,20 @@ with tab_frontier:
             optimal_weights = optimal_at_risk['weights']
             
             # Create comparison table
-# Create comparison table
+            # Get company names
+            ticker_names = get_stock_names(returns.columns.tolist())
+
+            # ✅ FIX: Use currently active weights (manual or optimized)
+            if st.session_state.get("use_optimized") and st.session_state.get("opt_weights"):
+                current_active_weights = np.array(st.session_state["opt_weights"])
+            else:
+                current_active_weights = current['weights']
+
             weights_comparison = pd.DataFrame({
-                'Asset': returns.columns.tolist(),                
-                'Current Weight (%)': (current['weights'] * 100).round(2),
+                'Company': [ticker_names[t] for t in returns.columns.tolist()],
+                'Ticker': returns.columns.tolist(),
                 'Optimal Weight (%)': (optimal_weights * 100).round(2),
-                'Change (%)': ((optimal_weights - current['weights']) * 100).round(2)
             })
-            
             # Sort by optimal weight (highest first)
             weights_comparison = weights_comparison.sort_values('Optimal Weight (%)', ascending=False).reset_index(drop=True)
             
@@ -1093,15 +1255,7 @@ with tab_frontier:
                 hide_index=True
             )
             
-            # Highlight major changes
-            major_changes = weights_comparison[abs(weights_comparison['Change (%)']) > 5.0]
-            
-            if not major_changes.empty:
-                st.caption("💡 **Major changes (>5%):**")
-                for _, row in major_changes.iterrows():
-                    direction = "increase" if row['Change (%)'] > 0 else "decrease"
-                    st.caption(f"• **{row['Asset']}**: {direction} by {abs(row['Change (%)']):.2f}% (from {row['Current Weight (%)']}% to {row['Optimal Weight (%)']}%)")
-            
+
             # ✅ CORRECTED: Apply button
             st.divider()
             if st.button("✅ Apply Optimal Weights to Portfolio", type="primary", use_container_width=True):
