@@ -9,11 +9,15 @@ __pycache__/
 venv/
 env/
 ENV/
-.venv
+.venv/
 
 # Streamlit secrets (CRITICAL!)
 .streamlit/secrets.toml
 secrets.toml
+
+# Environment variables
+.env
+.env.*
 
 # IDE
 .vscode/
@@ -28,10 +32,6 @@ Thumbs.db
 # Jupyter notebooks
 .ipynb_checkpoints
 
-# Environment variables
-.env
-.env.local
-
 # Local test files
 tasks.txt
 test_*.py
@@ -42,11 +42,12 @@ test_*.py
 # Docker
 .devcontainer/
 
-.env
-.env.*
-.streamlit/secrets.toml
-*.json
-venv/
-.venv/
-__pycache__/
-*.pyc
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
