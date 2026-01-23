@@ -116,16 +116,6 @@ Built-in optimization engine supporting:
 
 ---
 
-## 🧠 Why This Project is Different
-Most student finance projects stop at basic return charts.
-
-This app includes institutional-grade additions:
-- Tail risk (CVaR), downside risk (Sortino), drawdowns
-- Efficient frontier visualization
-- Optimization with apply bridge into UI
-- Persistent users + database logging
-- AI portfolio commentary layer
-
 ---
 
 ## 🚀 Getting Started
@@ -270,19 +260,6 @@ Weights: 20%, 20%, 20%, 20%, 20%
 4. Wait 1-2 minutes and retry
 5. Clear browser cache
 
-### Company names showing as tickers
-
-**Fix:**
-1. Click **"🔄 Clear Name Cache"** button in sidebar
-2. Wait 10-15 seconds for names to reload
-3. If issue persists, check internet connection
-4. Try reloading the page
-
-### Weights don't sum to 100%
-
-The dashboard auto-normalizes weights close to 100%. If you see a warning:
-1. Manually adjust sliders to total exactly 100%
-2. Or let the system normalize (within 0.1% tolerance)
 
 ### Streamlit Cloud Deployment Issues
 
@@ -313,26 +290,6 @@ The dashboard auto-normalizes weights close to 100%. If you see a warning:
 | **Authentication** | session_state + streamlit-cookies-manager |
 | **AI Engine** | Google Gemini 2.0 Flash |
 | **Deployment** | Streamlit Cloud |
-
----
-
-## 🎓 Why This Project Stands Out
-
-Most student/hobby finance projects stop at basic return charts and simple metrics. This dashboard includes **institutional-grade features** rarely seen in open-source projects:
-
-✅ **Tail Risk Metrics** — CVaR, not just VaR  
-✅ **Downside Risk Focus** — Sortino ratio, drawdown analysis  
-✅ **Interactive Efficient Frontier** — full MPT implementation  
-✅ **Optimization Bridge** — apply optimized weights directly to UI  
-✅ **Persistent State** — user accounts, saved portfolios  
-✅ **AI Commentary Layer** — Gemini-powered analysis  
-✅ **Production-Ready Code** — error handling, caching, validation  
-
-**Real-world applications:**
-- Personal portfolio management
-- University finance coursework
-- Quantitative research sandbox
-- Client presentation tool (with disclaimers)
 
 ---
 
@@ -472,6 +429,6 @@ If you find this project useful, please consider giving it a star! ⭐
 
 **Built with ❤️ for the quantitative finance community**
 
-[🚀 Try Live Demo](https://portfolio-analytics-dashboard-hstg.streamlit.app/) • [📖 Documentation](https://github.com/hstg11/portfolio-analytics-dashboard-hstg/wiki) • [💬 Discussions](https://github.com/hstg11/portfolio-analytics-dashboard-hstg/discussions)
+
 
 </div>
