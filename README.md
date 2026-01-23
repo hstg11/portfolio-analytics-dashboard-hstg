@@ -68,12 +68,24 @@ Supports:
 ---
 
 ### 🏔️ 7) Efficient Frontier (Vision Frontier)
-- Generates **500-5000 random portfolios**
-- Plots risk-return scatter based on inputed risk appetite
-- Highlights:
-  - Current portfolio
-  - Max Sharpe portfolio
-  - Efficient Frontier curve (best achievable set)
+A professional-grade **Markowitz Efficient Frontier** engine built directly into the dashboard.
+
+Key capabilities:
+- Generates **500 → 5000+ random portfolios** (Monte Carlo sampling of allocations)
+- Plots a **Risk vs Return scatter** for all sampled portfolios
+- Uses user-driven **Risk Appetite slider / selection** to filter & show portfolios relevant to the user's risk profile
+- Draws the **Efficient Frontier curve** (upper envelope of best-return portfolios for each risk level)
+- Automatically identifies and highlights:
+  - ✅ **Current Manual Portfolio**
+  - 🚀 **Max Sharpe Portfolio (Tangency portfolio)**
+  - (Optional if available) 🛡️ **Minimum Volatility Portfolio**
+- Shows portfolio location interpretation:
+  - Whether the user portfolio lies **below / on / near the frontier**
+  - How much improvement potential exists in risk-adjusted terms
+- Enables natural portfolio exploration:
+  - Users can visually compare trade-offs and decide whether to move toward
+    higher return, lower risk, or best Sharpe allocation.
+
 
 ---
 
