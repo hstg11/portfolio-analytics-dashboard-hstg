@@ -108,7 +108,7 @@ if "loaded_weights" not in st.session_state:
 
 # Persistent portfolio state
 if "current_tickers" not in st.session_state:
-    st.session_state["current_tickers"] = "500034.BO,500520.bo,INFY.NS, ITC.NS, SBIN.NS, DRREDDY.NS, ETERNAL.NS, 500325.BO, 500696.BO"
+    st.session_state["current_tickers"] = "500034.BO,500520.bo,INFY.NS, ITC.NS, SBIN.NS, DRREDDY.NS,500325.BO, 500696.BO"
 
 if "current_weights_pct" not in st.session_state:
     st.session_state["current_weights_pct"] = None
