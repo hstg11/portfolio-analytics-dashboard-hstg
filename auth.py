@@ -165,7 +165,7 @@ def save_user(email, name, phone, city, users_ws):
         st.error(f"Error saving user: {e}")
 
 
-def save_portfolio(email, name, portfolio_name, tickers, weights, portfolios_ws, opt_weights=None):
+def save_portfolio(email, name, portfolio_name, tickers, weights, portfolios_ws, opt_weights=None, cash_pct=0.0):
     """Save portfolio snapshot to Google Sheets with sequential ID"""
     try:
         all_records = portfolios_ws.get_all_records()
@@ -194,8 +194,8 @@ def save_portfolio(email, name, portfolio_name, tickers, weights, portfolios_ws,
             weights_str,
             opt_weights_str,
             now_ist(),
-            "active"  # ✅ NEW: All new portfolios are active
-
+            "active",
+            round(float(cash_pct), 4)  # ✅ V2: column 10 — cash weight %
         ])
         return True
     except Exception as e:

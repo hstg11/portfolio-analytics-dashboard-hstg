@@ -78,11 +78,14 @@ def collect_portfolio_data(
     optimized_sharpe=None,
     frontier_position=None,
     optimal_improvement=None,
-    target_risk=None,  # ✅ NEW
-    monte_carlo_p5=None,  # ✅ NEW
-    monte_carlo_p50=None,  # ✅ NEW
-    monte_carlo_p95=None,  # ✅ NEW
-    monte_carlo_days=None  # ✅ NEW
+    target_risk=None,
+    monte_carlo_p5=None,
+    monte_carlo_p50=None,
+    monte_carlo_p95=None,
+    monte_carlo_days=None,
+    cash_pct=0,  # ✅ V2: Cash component
+    risk_attribution_data=None,   # dict from MCTR tab
+    return_attribution_data=None  # dict from brinson attribution tab
 ):
     """
     Collect all portfolio metrics + qualitative context.
@@ -158,12 +161,24 @@ def collect_portfolio_data(
         "optimal_improvement": f"{optimal_improvement:.2f}" if optimal_improvement else "N/A",
         "target_risk": f"{target_risk:.1f}" if target_risk else "N/A",  # ✅ NEW
         
+        # ✅ V2: Cash component
+        "cash_pct": cash_pct,
+        "has_cash": cash_pct > 0,
+        
         # ✅ NEW: Monte Carlo
         "has_monte_carlo": monte_carlo_p5 is not None,
         "monte_carlo_days": f"{monte_carlo_days}" if monte_carlo_days else "N/A",
         "monte_carlo_p5": f"{monte_carlo_p5:.2f}" if monte_carlo_p5 else "N/A",
         "monte_carlo_p50": f"{monte_carlo_p50:.2f}" if monte_carlo_p50 else "N/A",
         "monte_carlo_p95": f"{monte_carlo_p95:.2f}" if monte_carlo_p95 else "N/A",
+
+        # ✅ NEW: Risk Attribution (MCTR)
+        "has_risk_attr": risk_attribution_data is not None,
+        "risk_attr": risk_attribution_data or {},
+
+        # ✅ NEW: Return Attribution (Brinson)
+        "has_return_attr": return_attribution_data is not None,
+        "return_attr": return_attribution_data or {},
     }
     
     return data
@@ -181,6 +196,7 @@ You are a portfolio analyst providing an executive briefing to a client.
 
 PORTFOLIO:
 {data['weights_display']}
+{"Cash Allocation: " + str(data['cash_pct']) + "% (earning risk-free rate)" if data.get('has_cash') else ""}
 Period: {data['date_range']} ({data['time_period_years']} years)
 
 KEY METRICS:
@@ -188,6 +204,8 @@ KEY METRICS:
 - Sharpe: {data['sharpe']} | Sortino: {data['sortino']}
 - Max Drawdown: {data['max_drawdown']}%
 - Correlation: {data['correlation_context']}
+{f"- Largest Risk Contributor: {data['risk_attr'].get('top_risk_name', '')} ({data['risk_attr'].get('top_risk_pct', '')}% of portfolio risk) | Diversification Ratio: {data['risk_attr'].get('diversification_ratio', '')}x" if data.get('has_risk_attr') else ""}
+{f"- Active Return vs {data.get('benchmark_name', 'benchmark')}: {data['return_attr'].get('active_return', '')}% | Top booster: {data['return_attr'].get('top_booster_name', '')} | Biggest drag: {data['return_attr'].get('top_drag_name', '')}" if data.get('has_return_attr') else ""}
 
 TASK: Write a 170-word summary addressing:
 
@@ -197,7 +215,11 @@ TASK: Write a 170-word summary addressing:
 
 3. **Performance Quality** (1 sentence): Is the risk-adjusted return strong (Sharpe/Sortino interpretation)?
 
-4. **Key Opportunity** (1-2 sentences): What's the #1 actionable insight for improvement?
+4. **Attribution Highlight** (1 sentence, only if data available): Name the single biggest risk driver or return contributor that stands out.
+
+5. ** Return Attribution Insight** (1 sentence, only if data available): What does the balance of boosters vs drags suggest about the nature of returns? Biggest booster vs biggest drag story?
+
+6. **Key Opportunity** (1-2 sentences): What's the #1 actionable insight for improvement?
 
 TONE: Direct, analytical, conversational. Like a portfolio manager briefing a client.
 NO FLUFF: Every sentence must deliver value.
@@ -217,6 +239,7 @@ You are writing SECTION 1 of a comprehensive portfolio analysis report.
 
 PORTFOLIO DATA:
 - Holdings: {data['weights_display']}
+{"- Cash Allocation: " + str(data['cash_pct']) + "% (earning risk-free rate, excluded from optimizer)" if data.get('has_cash') else ""}
 - Dominant Position: {data['dominant_asset']}
 - Period: {data['date_range']} ({data['time_period_years']} years)
 - Volatility: {data['volatility']}% | Sharpe: {data['sharpe']} | Sortino: {data['sortino']}
@@ -397,7 +420,79 @@ RULES:
     return prompt
 
 
-def create_section_conclusion_prompt(data, has_benchmark, has_optimization, has_frontier):
+def create_section_risk_attr_prompt(data):
+    """Section: Risk Attribution / MCTR (140-160 words) — CONDITIONAL"""
+
+    ra = data.get("risk_attr", {})
+
+    prompt = f"""
+You are continuing a portfolio analysis report. Write the RISK ATTRIBUTION section.
+
+RISK ATTRIBUTION DATA (Marginal Contribution to Risk):
+- Diversification Ratio: {ra.get('diversification_ratio', 'N/A')}x
+- Equity Volatility: {ra.get('equity_vol_pct', 'N/A')}%
+- Largest Risk Contributor: {ra.get('top_risk_name', 'N/A')} ({ra.get('top_risk_pct', 'N/A')}% of portfolio risk, weight {ra.get('top_risk_weight', 'N/A')}%)
+- Most Efficient Diversifier (lowest risk/weight ratio): {ra.get('best_diversifier_name', 'N/A')} ({ra.get('best_diversifier_risk_pct', 'N/A')}% risk, {ra.get('best_diversifier_weight', 'N/A')}% weight)
+- All assets risk breakdown: {ra.get('risk_breakdown_str', 'N/A')}
+
+TASK: Write EXACTLY 140-160 words on risk attribution:
+
+**MCTR Insights**
+- What the Diversification Ratio of {ra.get('diversification_ratio', 'N/A')}x means in practice
+- Why {ra.get('top_risk_name', 'N/A')} dominates portfolio risk despite its weight
+- Identify any risk-weight mismatch (assets punching above/below their weight in risk)
+- What the efficient diversifier is doing for the portfolio
+- One concrete rebalancing implication
+
+RULES:
+- Reference "Beyond tail risk metrics" to connect to earlier sections
+- NO greetings, NO section headers
+- MUST be 140-160 words (COUNT CAREFULLY)
+- Stop writing after 160 words MAXIMUM
+"""
+    return prompt
+
+
+def create_section_return_attr_prompt(data):
+    """Section: Return Attribution / Brinson (160-180 words) — CONDITIONAL"""
+
+    ret_a = data.get("return_attr", {})
+
+    prompt = f"""
+You are continuing a portfolio analysis report. Write the RETURN ATTRIBUTION section.
+
+RETURN ATTRIBUTION DATA:
+- Portfolio Return: {ret_a.get('portfolio_return', 'N/A')}%
+- Benchmark Return: {ret_a.get('benchmark_return', 'N/A')}%
+- Active Return (Alpha): {ret_a.get('active_return', 'N/A')}%
+- Number of Boosters (beat benchmark): {ret_a.get('num_boosters', 'N/A')}
+- Total Boost from winners: {ret_a.get('total_boost', 'N/A')}%
+- Number of Drags (lagged benchmark): {ret_a.get('num_drags', 'N/A')}
+- Total Drag from laggards: {ret_a.get('total_drag', 'N/A')}%
+- Top Booster: {ret_a.get('top_booster_name', 'N/A')} (contributed {ret_a.get('top_booster_contrib', 'N/A')}%, return {ret_a.get('top_booster_return', 'N/A')}%)
+- Biggest Drag: {ret_a.get('top_drag_name', 'N/A')} (contributed {ret_a.get('top_drag_contrib', 'N/A')}%, return {ret_a.get('top_drag_return', 'N/A')}%)
+{"- Cash (" + str(ret_a.get('cash_pct', '')) + "%) contributed: " + str(ret_a.get('cash_contrib', 'N/A')) + "% to active return" if ret_a.get('cash_pct', 0) and float(str(ret_a.get('cash_pct', 0))) > 0 else ""}
+
+TASK: Write EXACTLY 160-180 words on return attribution:
+
+**Active Return Decomposition**
+- Quality of the {ret_a.get('active_return', 'N/A')}% active return: was it driven by few concentrated bets or broad outperformance?
+- {ret_a.get('top_booster_name', 'N/A')}'s outsized contribution — what it signals about selection skill
+- The drag from {ret_a.get('top_drag_name', 'N/A')} — position sizing vs return drag tradeoff
+- Booster vs drag balance: {ret_a.get('num_boosters', 'N/A')} winners vs {ret_a.get('num_drags', 'N/A')} laggards — breadth of outperformance
+- One actionable insight from this attribution picture
+
+RULES:
+- Reference "The risk attribution analysis showed" to connect sections
+- NO greetings, NO section headers
+- MUST be 160-180 words (COUNT CAREFULLY)
+- Stop writing after 180 words MAXIMUM
+"""
+    return prompt
+
+
+
+def create_section_conclusion_prompt(data, has_benchmark, has_optimization, has_frontier, has_risk_attr=False, has_return_attr=False):
     """Final Section: Strategic Summary (120-140 words)"""
     
     context_parts = ["risk metrics"]
@@ -407,6 +502,10 @@ def create_section_conclusion_prompt(data, has_benchmark, has_optimization, has_
         context_parts.append("optimization analysis")
     if has_frontier:
         context_parts.append("efficient frontier positioning")
+    if has_risk_attr:
+        context_parts.append("risk attribution (MCTR)")
+    if has_return_attr:
+        context_parts.append("return attribution (active return decomposition)")
     
     context_string = ", ".join(context_parts)
     
@@ -422,6 +521,8 @@ PORTFOLIO SUMMARY:
 {"- Alpha: " + data['alpha'] + "% vs " + data['benchmark_name'] if has_benchmark else ""}
 {"- Optimization: +" + data['sharpe_improvement'] + " Sharpe" if has_optimization else ""}
 {"- Frontier: " + data['frontier_position'] + " (+" + data['optimal_improvement'] + "% potential)" if has_frontier else ""}
+{"- Largest Risk Driver: " + data['risk_attr'].get('top_risk_name', '') + " (" + str(data['risk_attr'].get('top_risk_pct', '')) + "% of risk)" if has_risk_attr else ""}
+{"- Active Return: " + str(data['return_attr'].get('active_return', '')) + "% | Top booster: " + str(data['return_attr'].get('top_booster_name', '')) if has_return_attr else ""}
 
 TASK: Write EXACTLY 120-140 words as CONCLUSION:
 
@@ -540,6 +641,16 @@ def generate_full_analysis(data_dict, user_email=None):
             section_5 = call_and_count(create_section_5_prompt(data_dict), "Section 5")
             sections.append(section_5.strip())
 
+        # Section: Risk Attribution (conditional)
+        if data_dict.get("has_risk_attr"):
+            section_risk_attr = call_and_count(create_section_risk_attr_prompt(data_dict), "Risk Attribution")
+            sections.append(section_risk_attr.strip())
+
+        # Section: Return Attribution (conditional)
+        if data_dict.get("has_return_attr"):
+            section_return_attr = call_and_count(create_section_return_attr_prompt(data_dict), "Return Attribution")
+            sections.append(section_return_attr.strip())
+
         # Conclusion
         conclusion = call_and_count(
             create_section_conclusion_prompt(
@@ -547,6 +658,8 @@ def generate_full_analysis(data_dict, user_email=None):
                 data_dict.get("has_benchmark") or data_dict.get("has_monte_carlo"),
                 data_dict.get("has_optimization"),
                 data_dict.get("has_frontier"),
+                has_risk_attr=data_dict.get("has_risk_attr", False),
+                has_return_attr=data_dict.get("has_return_attr", False),
             ),
             "Conclusion"
         )
@@ -589,15 +702,21 @@ def generate_full_analysis(data_dict, user_email=None):
             section_number += 1
             current_idx += 1
 
+        if data_dict.get("has_risk_attr"):
+            formatted_sections.append(f"## {section_number}. Risk Attribution (MCTR Analysis)\n\n{sections[current_idx]}")
+            section_number += 1
+            current_idx += 1
+
+        if data_dict.get("has_return_attr"):
+            formatted_sections.append(f"## {section_number}. Return Attribution (Active Return Decomposition)\n\n{sections[current_idx]}")
+            section_number += 1
+            current_idx += 1
+
         formatted_sections.append(f"## {section_number}. Strategic Summary\n\n{sections[current_idx]}")
 
         final_report = "\n\n---\n\n".join(formatted_sections)
 
-        disclaimer = """
-**Disclaimer:** *This analysis is generated by AI for educational purposes only. 
-Financial markets involve significant risk. Past performance is not indicative of future results. 
-Please consult a certified financial advisor before making any investment decisions.*
-        """.strip()
+        disclaimer = "**Disclaimer:** *This analysis is generated by AI for educational purposes only. Financial markets involve significant risk. Past performance is not indicative of future results. Please consult a certified financial advisor before making any investment decisions.*"
 
         # ✅ Increment Google Sheet counters ONCE per full analysis request
         # (but with the correct number of internal calls)
@@ -694,6 +813,12 @@ def render_full_analysis_tab(data_dict):
     
     if data_dict['has_frontier']:
         sections_info.append("✅ Efficient Frontier Position")
+
+    if data_dict.get('has_risk_attr'):
+        sections_info.append("✅ Risk Attribution (MCTR Analysis)")
+
+    if data_dict.get('has_return_attr'):
+        sections_info.append("✅ Return Attribution (Active Return Decomposition)")
     
     sections_info.append("✅ Strategic Summary")
     

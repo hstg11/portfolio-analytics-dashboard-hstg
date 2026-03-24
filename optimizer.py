@@ -114,16 +114,17 @@ def generate_random_portfolios(
         'weights': []
     }
     
+    req_weight = lower_limit / 100.0
+    remaining_weight = max(0.0, 1.0 - (num_assets * req_weight))  # BUG 4 FIX: safe fallback
+
     for _ in range(num_portfolios):
-        # Generate random weights
-        weights = np.random.random(num_assets)
-        
-        # Apply lower limit constraint
-        weights = np.maximum(weights, lower_limit / 100.0)
-        
-        # Normalize to sum to 1
-        weights = weights / np.sum(weights)
-        
+        # BUG 4 FIX: old code did np.maximum() then normalised, which pulled
+        # weights back below the limit.  Correct approach: assign the floor to
+        # every asset first, then distribute the leftover randomly.
+        rand_w = np.random.random(num_assets)
+        rand_w = rand_w / np.sum(rand_w)
+        weights = (rand_w * remaining_weight) + req_weight  # guaranteed >= req_weight, sums to 1
+
         # Calculate portfolio metrics
         port_return = portfolio_return_opt(weights, mean_returns)
         port_vol = portfolio_volatility_opt(weights, cov_matrix)

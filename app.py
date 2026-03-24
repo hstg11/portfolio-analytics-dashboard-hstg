@@ -193,41 +193,97 @@ invalid = [t for t in tickers_list if not validate_ticker(t)]
 if invalid:
     st.error(f"Invalid tickers: {', '.join(invalid)}")
     st.stop()
-# ✅ Detect if ticker count changed - reset to equal weights
+# ============================================
+# CASH COMPONENT SESSION STATE
+# ============================================
+if "cash_weight_pct" not in st.session_state:
+    st.session_state["cash_weight_pct"] = 0.0
+
+# ✅ Detect if ticker count changed - reset to equal weights (including cash slot)
 if "last_ticker_count" not in st.session_state:
     st.session_state["last_ticker_count"] = len(tickers_list)
 
 if len(tickers_list) != st.session_state["last_ticker_count"]:
-    # Ticker count changed! Reset weights
     st.session_state["last_ticker_count"] = len(tickers_list)
-    st.session_state["current_weights_pct"] = None  # Force equal weights
+    st.session_state["current_weights_pct"] = None  # Force equal weights reset
+    st.session_state["cash_weight_pct"] = 0.0       # Reset cash too
 
 st.sidebar.info("""Input Guide for Indian Stocks - NSE stocks → (Ticker + `.NS(NSE) or .BO(BSE)`) , e.g. `500325.BO(Reliance)`, `INFY.NS`, `TCS.NS`.""")
 
-
-# Weight sliders - reads from loaded portfolio
+# ============================================
+# WEIGHT INPUTS (Equities + Cash)
+# ============================================
 st.sidebar.subheader("🎚 Portfolio Weights (in %)")
+
+# --- Total slots = num tickers + 1 (cash) ---
+# Equal weight default splits 100% across all tickers + cash slot
+# Cash default is 0, so equal weight only kicks in for equities unless cash was set
 
 weights = []
 for i, t in enumerate(tickers_list):
+    # Priority: loaded portfolio > stored weights (if count matches) > equal weight
     if st.session_state["loaded_weights"] is not None and i < len(st.session_state["loaded_weights"]):
         default_weight = st.session_state["loaded_weights"][i] * 100
-    elif st.session_state["current_weights_pct"] and i < len(st.session_state.get("current_weights_pct", [])):
-        # ✅ Only use stored weights if count matches
-        if len(st.session_state["current_weights_pct"]) == len(tickers_list):
-            default_weight = st.session_state["current_weights_pct"][i]
-        else:
-            default_weight = round(100 / len(tickers_list), 2)
+    elif (
+        st.session_state["current_weights_pct"]
+        and len(st.session_state["current_weights_pct"]) == len(tickers_list)
+    ):
+        default_weight = st.session_state["current_weights_pct"][i]
     else:
         default_weight = round(100 / len(tickers_list), 2)
-    
+
     w = st.sidebar.number_input(
-        f"Weight for {t}",
+        f"Weight for {t} (%)",
         min_value=0.0,
         max_value=100.0,
-        value=default_weight
+        value=float(default_weight),
+        step=0.5,
     )
     weights.append(w)
+
+# ✅ V2: Cash as a weight input — same style as equity weights
+cash_weight_pct = st.sidebar.number_input(
+    "💵 Weight for CASH (%)",
+    min_value=0.0,
+    max_value=100.0,
+    value=float(st.session_state["cash_weight_pct"]),
+    step=0.5,
+    help="Cash earns the risk-free rate. Include in total weight like any other position."
+)
+st.session_state["cash_weight_pct"] = cash_weight_pct
+
+# ============================================
+# WEIGHT VALIDATION (equities + cash must = 100%)
+# ============================================
+total_with_cash = sum(weights) + cash_weight_pct
+
+if abs(total_with_cash - 100) > 0.1:
+    st.sidebar.warning(
+        f"⚠️ Weights sum to {total_with_cash:.2f}%. "
+        f"Adjust equities + cash to equal exactly 100%."
+    )
+elif abs(total_with_cash - 100) > 0.01:
+    # Close enough — auto-normalize equities (keep cash fixed)
+    equity_total = sum(weights)
+    if equity_total > 0:
+        scale = (100 - cash_weight_pct) / equity_total
+        weights = [w * scale for w in weights]
+    st.sidebar.caption("✅ Normalized to 100%")
+
+if cash_weight_pct > 0:
+    st.sidebar.caption(
+        f"💵 {cash_weight_pct:.1f}% cash earning risk-free rate | "
+        f"{100 - cash_weight_pct:.1f}% equities"
+    )
+
+# ============================================
+# RISK-FREE RATE
+# ============================================
+risk_free = st.sidebar.number_input(
+    "Risk-free rate (%)",
+    value=6.0,
+    step=0.25
+) / 100
 
 st.sidebar.subheader("Optimizer Settings")
 lower_limit = st.sidebar.number_input(
@@ -238,12 +294,17 @@ lower_limit = st.sidebar.number_input(
     step=1.0,
 )
 
+# Store equity weights (as pct) for persistence
 st.session_state["current_weights_pct"] = weights.copy()
 
 if st.session_state["loaded_weights"] is not None:
     st.session_state["loaded_weights"] = None
 
+# Convert equity weights to fractions
 weights = [w / 100 for w in weights]
+
+# cash_pct as a fraction for downstream use
+cash_pct = cash_weight_pct / 100.0
 
 # ============================================
 # OPTIMIZER OVERRIDE
@@ -252,7 +313,7 @@ if st.session_state["use_optimized"] and st.session_state["opt_weights"] is not 
     if len(st.session_state["opt_weights"]) == len(tickers_list):
         weights = st.session_state["opt_weights"]
         st.sidebar.success("✅ Using Optimized Weights")
-        
+
         if st.sidebar.button("🔄 Back to Manual Weights"):
             st.session_state["use_optimized"] = False
             st.rerun()
@@ -263,16 +324,14 @@ else:
     st.sidebar.info("ℹ️ Using Manual Weights")
 
 # ============================================
-# WEIGHT VALIDATION
+# FINAL WEIGHT CHECK (equities only, post-override)
 # ============================================
 total = sum(weights)
 
-if abs(total - 1) > 0.001:
-    st.sidebar.warning(f"⚠️ Weights sum to {total*100:.2f}%. Adjust to 100%.")
-elif abs(total - 1) > 1e-6:  # Close enough, auto-normalize
-    weights = [w / total for w in weights]
-    st.sidebar.caption(f"✅ Normalized to 100%")
-else:
+if abs(total - 1) > 0.001 and cash_pct == 0:
+    # Only show pure equity warning when no cash is set (combined check already done above)
+    pass
+elif abs(total - 1) > 1e-6 and cash_pct == 0:
     st.sidebar.caption("✅ Total: 100%")
 
 # ============================================
@@ -289,18 +348,42 @@ raw = yf.download(
     progress=False
 )
 
-risk_free = st.sidebar.number_input(
-    "Risk-free rate (%)",
-    value=6.0,
-    step=0.25
-) / 100
 
 # ============================================
 # TABS
 # ============================================
-tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer, tab_frontier, tab_ai = st.tabs(
-    ["📊 Overview", "⚠️ Risk", "📈 Benchmark", "🎲 Monte Carlo", "🔧 Optimizer", "🏔️ Efficient Frontier", "🤖 AI Analysis"]
+tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer, tab_frontier, tab_mctr, tab_return_attr, tab_ai = st.tabs(
+    ["📊 Overview", "⚠️ Risk", "📈 Benchmark", "🎲 Monte Carlo", "🔧 Optimizer", "🏔️ Efficient Frontier", "📐 Risk Attribution", "📊 Return Attribution", "🤖 AI Analysis"]
 )
+# ============================================
+# DATA & RETURNS (computed outside tabs — shared by all tabs)
+# ============================================
+# ============================================
+# DATA & RETURNS (computed outside tabs — shared by all tabs)
+# ============================================
+data = raw["Close"]
+if "Adj Close" in raw.columns:
+    data = raw["Adj Close"]
+data = data.dropna()
+
+# BUG 1 FIX: Compute returns FIRST on full data (including adjusted_start day),
+# THEN filter to requested start_date — prevents losing the first 2 trading days.
+returns_full = data.pct_change().dropna()
+returns = returns_full[returns_full.index >= pd.to_datetime(start_date)]
+
+# BUG 2 FIX: Handle single-ticker (yfinance returns a Series, not a DataFrame).
+# Also enforce user's ticker order (yfinance sorts columns alphabetically).
+if isinstance(returns, pd.DataFrame) and len(tickers_list) > 1:
+    returns = returns[tickers_list]
+elif isinstance(returns, pd.Series):
+    returns = returns.to_frame(name=tickers_list[0])
+
+# Keep data aligned to the same window as returns for price charts
+data = data[data.index >= pd.to_datetime(start_date)]
+
+# Ticker names (cached)
+ticker_names = get_stock_names(tickers_list)
+
 # ============================================
 # OVERVIEW TAB
 # ============================================
@@ -309,16 +392,10 @@ tab_overview, tab_risk, tab_benchmark, tab_monte, tab_optimizer, tab_frontier, t
 # ============================================
 with tab_overview:
     st.subheader("📈 Price History")
-    data = raw["Close"]
 
-    if "Adj Close" in raw.columns:
-        data = raw["Adj Close"]
-
-    data = data.dropna()
-    data = data[data.index >= pd.to_datetime(start_date)]
-
-    # Fetch names
-    ticker_names = get_stock_names(tickers_list)
+    # ✅ V2: Cash component banner
+    if cash_pct > 0:
+        st.info(f"💵 **Cash Component:** {cash_pct*100:.1f}% in cash + {(1-cash_pct)*100:.1f}% in equities below.")
 
     # Prepare chart data
     price_df = data.reset_index().melt('Date', var_name='Ticker', value_name='Price')
@@ -330,11 +407,10 @@ with tab_overview:
         .encode(
             x=alt.X('Date:T', axis=alt.Axis(format='%b %Y', labelAngle=0, labelOverlap=True)),
             y=alt.Y('Price:Q', title="Price"),
-            # Use Company name for color and legend
             color=alt.Color('Company:N', legend=alt.Legend(
                 orient='bottom', 
                 title=None,
-                columns=6, # ✅ Forces legend into multiple rows if many tickers
+                columns=6,
                 symbolType='stroke'
             )),
             tooltip=['Date:T', 'Company:N', 'Ticker:N', 'Price:Q']
@@ -346,34 +422,35 @@ with tab_overview:
     # 2. Last 5 Days Prices Table
     st.subheader("📊 Last 5 Days: Closing Prices")
     price_display = data.tail().copy()
-    # Rename columns to Company Names
     price_display.columns = [ticker_names.get(t, t) for t in price_display.columns]
     st.dataframe(price_display, use_container_width=True)
     st.subheader("📊 Latest Returns")
-    
-    # Logic for the Data Table
-    returns_full = data.pct_change().dropna()
-    
-    # ✅ Skip first return row (transition from extra day we fetched for calculation accuracy)
-    returns = returns_full.iloc[1:] if len(returns_full) > 1 else returns_full
-    
+
     if not returns.empty:
-        # ✅ FIX: Rename columns from Tickers to Company Names for the table
         returns_display = returns.tail().copy()
         returns_display.columns = [ticker_names.get(t, t) for t in returns_display.columns]
-        
-        # Formatting for percentage display
         returns_formatted = returns_display.style.format(lambda x: f"{x:.2%}")
-        
         st.dataframe(returns_formatted, use_container_width=True)
     else:
         st.warning("No price data available for the selected tickers/date range.")
         st.stop()
 
+if returns.empty:
+    st.error("No price data available for the selected tickers/date range.")
+    st.stop()
+
 if returns.shape[1] != len(weights):
     weights = np.repeat(1/returns.shape[1], returns.shape[1])
 
-portfolio_return = returns.dot(weights)
+# ============================================
+# CASH COMPONENT BLENDING
+# ============================================
+# cash_pct is already a fraction (e.g. 0.20 for 20%)
+# weights are equity fractions that should already sum to (1 - cash_pct)
+# We use them directly without additional scaling
+daily_rf = risk_free / 252
+equity_return = returns.dot(np.array(weights))
+portfolio_return = equity_return + cash_pct * daily_rf
 cumulative = (1 + portfolio_return).cumprod()
 
 
@@ -382,6 +459,13 @@ cumulative = (1 + portfolio_return).cumprod()
 # ============================================
 with tab_risk:
     st.header("📉 Portfolio Risk Metrics")
+
+    # ✅ V2: Cash component info banner
+    if cash_pct > 0:
+        st.info(
+            f"💵 **Cash Component Active:** {cash_pct*100:.1f}% allocated to cash (earning {risk_free*100:.2f}% p.a. risk-free rate). "
+            f"Metrics below reflect the blended portfolio of {(1-cash_pct)*100:.1f}% equities + {cash_pct*100:.1f}% cash."
+        )
 
     metrics = risk_metrics(portfolio_return, cumulative, risk_free)
 
@@ -394,7 +478,15 @@ with tab_risk:
     col2.caption("⚖️ Return earned **per unit of risk**. >1 is strong.")
 
     col3.metric("Max Drawdown", f"{metrics['max_drawdown_pct']:.2f}%")
-    col3.caption("📉 Worst peak‑to‑trough fall – shows **pain during crashes**.")
+    # Compute peak → trough dates for the max drawdown period
+    _rolling_max = cumulative.cummax()
+    _dd_series = (cumulative - _rolling_max) / _rolling_max
+    _trough_date = _dd_series.idxmin()
+    _peak_date   = cumulative.loc[:_trough_date].idxmax()
+    col3.caption(
+        f"📉 Worst peak‑to‑trough fall – shows **pain during crashes**. "
+        f"Peak: {_peak_date.strftime('%d %b %Y')} → Trough: {_trough_date.strftime('%d %b %Y')}"
+    )
 
     col4.metric("Sortino Ratio", f"{metrics['sortino']:.2f}" if not np.isnan(metrics["sortino"]) else "—")
     col4.caption("🎯 Risk‑adjusted return using **downside volatility only**.")
@@ -581,6 +673,17 @@ with tab_risk:
 # ============================================
 # BENCHMARK TAB
 # ============================================
+# ============================================
+# BENCHMARK DATA (shared across tabs)
+# ============================================
+# Defined outside tabs so both Benchmark tab and Return Attribution tab can use it
+benchmark_names = {
+    "^NSEI": "Nifty 50",
+    "^GSPC": "S&P 500",
+    "^NDX": "Nasdaq 100",
+    "^BSESN": "Sensex"
+}
+
 with tab_benchmark:
     st.header("📊 Portfolio vs Benchmark")
 
@@ -590,12 +693,6 @@ with tab_benchmark:
         index=0
     )
 
-    benchmark_names = {
-        "^NSEI": "Nifty 50",
-        "^GSPC": "S&P 500",
-        "^NDX": "Nasdaq 100",
-        "^BSESN": "Sensex"
-    }
     benchmark_label = benchmark_names.get(benchmark_symbol, "Benchmark")
     # Use helper from portfolio.py instead of inline download
     benchmark_returns, bench_cum = benchmark_series(benchmark_symbol, adjusted_start, end_date)
@@ -781,24 +878,54 @@ with tab_optimizer:
     )
 
     if st.button("Run Optimization", type="primary"):
+        # ✅ V2: Adjust lower_limit so after equity scaling each asset
+        # still meets user's intended min % of total portfolio
+        equity_scale = 1.0 - cash_pct
+        adjusted_lower_limit_opt = lower_limit / equity_scale if equity_scale > 0 else lower_limit
+
+        # BUG 3 FIX: Catch impossible constraints before scipy silently fails and
+        # returns garbage unoptimized weights (result.success = False).
+        if adjusted_lower_limit_opt * len(tickers_list_sorted) > 100.0:
+            st.error(
+                f"⚠️ Cannot optimize: the minimum weight ({lower_limit:.0f}%) × "
+                f"{len(tickers_list_sorted)} assets = "
+                f"{lower_limit * len(tickers_list_sorted):.0f}%, which exceeds the "
+                f"available equity portion ({equity_scale * 100:.1f}%). "
+                f"Lower the minimum weight or reduce cash."
+            )
+            st.stop()
+
         if "Max Sharpe" in goal:
             opt_weights_calc, ret, vol, sharpe = get_max_sharpe_portfolio(
-                mean_returns, cov_matrix, risk_free, lower_limit
+                mean_returns, cov_matrix, risk_free, adjusted_lower_limit_opt
             )
         else:
             opt_weights_calc, ret, vol, sharpe = get_min_volatility_portfolio(
-                mean_returns, cov_matrix, risk_free, lower_limit
+                mean_returns, cov_matrix, risk_free, adjusted_lower_limit_opt
             )
-        
-        # Save results
-        st.session_state["opt_weights"] = opt_weights_calc
+
+        # ✅ V2: Scale optimizer output by equity fraction immediately
+        # opt_weights_calc sums to 1.0 (pure equity). Scale to (1 - cash_pct) so
+        # stored weights + cash always = 100%.
+        equity_scale = 1.0 - cash_pct
+        opt_weights_scaled_stored = opt_weights_calc * equity_scale
+
+        # Save results — store SCALED weights so Apply button is consistent
+        st.session_state["opt_weights"] = opt_weights_scaled_stored.tolist()
+        st.session_state["opt_weights_raw"] = opt_weights_calc.tolist()  # keep raw for optimizer stats
         st.session_state["opt_stats"] = (ret, vol, sharpe)
-        st.session_state["opt_tickers_order"] = tickers_list_sorted  # ✅ Store the order
+        st.session_state["opt_tickers_order"] = tickers_list_sorted
         st.rerun()
 
     # --- 3. Display Results ---
     if "opt_weights" in st.session_state and "opt_stats" in st.session_state:
-        opt_weights_display = np.array(st.session_state["opt_weights"])
+        # ✅ Use raw weights for stats (they must sum to 1 for correct Sharpe/vol math)
+        opt_weights_raw = np.array(st.session_state.get("opt_weights_raw", st.session_state["opt_weights"]))
+        # Normalise raw in case it was stored before this fix
+        if abs(opt_weights_raw.sum() - 1.0) > 0.01:
+            opt_weights_raw = opt_weights_raw / opt_weights_raw.sum()
+
+        opt_weights_display = np.array(st.session_state["opt_weights"])  # scaled version for display
         ret, vol, sharpe = st.session_state["opt_stats"]
 
         # Safety Check: Ticker mismatch
@@ -807,15 +934,17 @@ with tab_optimizer:
             opt_weights_display = np.repeat(1/mean_returns.shape[0], mean_returns.shape[0])
             st.session_state["opt_weights"] = opt_weights_display
         else:
-            # Manual weights for comparison
-            manual_weights_array = np.array(weights)
+            # ✅ Manual weights — normalize to sum=1 for stats (equity portion only)
+            raw_manual = np.array(weights)  # may sum to (1 - cash_pct)
+            equity_total = raw_manual.sum()
+            manual_weights_norm = raw_manual / equity_total if equity_total > 0 else raw_manual
 
-            # Calculate stats using optimizer.py helper
+            # Calculate stats using normalized equity weights (optimizer always works on 100% equity)
             opt_ret, opt_vol, opt_sharpe = portfolio_stats(
-                opt_weights_display, mean_returns, cov_matrix, risk_free
+                opt_weights_raw, mean_returns, cov_matrix, risk_free
             )
             manual_ret, manual_vol, manual_sharpe = portfolio_stats(
-                manual_weights_array, mean_returns, cov_matrix, risk_free
+                manual_weights_norm, mean_returns, cov_matrix, risk_free
             )
 
             # --- Comparison Table ---
@@ -832,10 +961,11 @@ with tab_optimizer:
 
             st.dataframe(compare_df, use_container_width=True, hide_index=True)
 
-            # --- Charts (unchanged) ---
-                        # cumulative returns chart
-            manual_daily_ret = returns.dot(manual_weights_array)
-            opt_daily_ret = returns.dot(opt_weights_display)
+            # --- Charts ---
+            # Cumulative returns chart — use normalized equity weights for both
+            # (chart shows equity-only performance for fair comparison)
+            manual_daily_ret = returns.dot(manual_weights_norm)
+            opt_daily_ret = returns.dot(opt_weights_raw)
 
             aligned_returns = pd.concat([manual_daily_ret, opt_daily_ret], axis=1).dropna()
             aligned_returns.columns = ["Manual", "Optimized"]
@@ -862,12 +992,24 @@ with tab_optimizer:
             # Get company names
             ticker_names = get_stock_names(tickers_list)
 
+            # ✅ V2: opt_weights_display is already scaled to (1 - cash_pct)
+            # manual weights (raw_manual) already sum to (1 - cash_pct) when cash > 0
             alloc_df = pd.DataFrame({
                 "Ticker": tickers_list,
                 "Company": [ticker_names[t] for t in tickers_list],
-                "Manual": manual_weights_array * 100,
+                "Manual": raw_manual * 100,
                 "Optimized": opt_weights_display * 100
             })
+
+            # Add cash row if applicable
+            if cash_pct > 0:
+                cash_row = pd.DataFrame([{
+                    "Ticker": "CASH",
+                    "Company": "💵 Cash (Risk-Free)",
+                    "Manual": cash_pct * 100,
+                    "Optimized": cash_pct * 100
+                }])
+                alloc_df = pd.concat([alloc_df, cash_row], ignore_index=True)
 
             # Melt while keeping both Ticker and Company
             alloc_df_melted = alloc_df.melt(
@@ -882,9 +1024,9 @@ with tab_optimizer:
                 title=None, 
                 sort=None, 
                 axis=alt.Axis(
-                    labelAngle=-45,      # ✅ Easy to read slant
-                    labelOverlap=False,   # ✅ Show all company names
-                    labelLimit=150        # ✅ Prevents cutting off long names
+                    labelAngle=-45,
+                    labelOverlap=False,
+                    labelLimit=150
                 )
             ),
             y=alt.Y("Weight (%):Q", title="Weight (%)"),
@@ -896,28 +1038,50 @@ with tab_optimizer:
             tooltip=["Company:N", "Ticker:N", "Type:N", alt.Tooltip("Weight (%)", format=".1f")]
         ).properties(
             height=350,
-            width=alt.Step(80)  # ✅ Adds horizontal breathing room per bar group
+            width=alt.Step(80)
         )
                         
             st.altair_chart(alloc_chart, use_container_width=True)
 
             # weights table
             st.subheader("Optimized Portfolio Weights")
+            if cash_pct > 0:
+                st.caption(f"✅ Equity weights scaled to {(1-cash_pct)*100:.1f}% of portfolio. Cash ({cash_pct*100:.1f}%) is fixed.")
 
             # Get company names
             ticker_names = get_stock_names(mean_returns.index.tolist())
 
+            # opt_weights_display is already scaled by (1 - cash_pct)
             opt_df = pd.DataFrame({
                 "Company": [ticker_names[t] for t in mean_returns.index],
-                "Ticker": mean_returns.index,
+                "Ticker": list(mean_returns.index),
                 "Weight %": (opt_weights_display * 100).round(2)
             })
+
+            # Add cash row
+            if cash_pct > 0:
+                cash_df_row = pd.DataFrame([{
+                    "Company": "💵 Cash (Risk-Free)",
+                    "Ticker": "CASH",
+                    "Weight %": round(cash_pct * 100, 2)
+                }])
+                opt_df = pd.concat([opt_df, cash_df_row], ignore_index=True)
+
+            # Total row
+            total_row = pd.DataFrame([{
+                "Company": "TOTAL",
+                "Ticker": "—",
+                "Weight %": round(opt_df["Weight %"].sum(), 2)
+            }])
+            opt_df = pd.concat([opt_df, total_row], ignore_index=True)
+
             st.dataframe(opt_df, hide_index=True, use_container_width=True)
 
-            # apply button
+            # apply button — opt_weights_display already sums to (1 - cash_pct)
+            # so when weights is set to this, equity + cash = 100% ✅
             if st.button("✅ Apply These Weights", type="primary"):
                 st.session_state["use_optimized"] = True
-                st.session_state["opt_weights"] = opt_weights_display.tolist() 
+                st.session_state["opt_weights"] = opt_weights_display.tolist()
                 st.success("✅ Optimized weights applied!")
                 st.toast("✅ Optimized weights applied!", icon="✅")
                 st.rerun()
@@ -979,14 +1143,21 @@ with tab_frontier:
             # Calculate required data
             mean_returns = returns.mean() * 252
             cov_matrix = returns.cov() * 252
-            
+
+            # ✅ V2: Adjust lower_limit so that after equity scaling, each asset
+            # still meets the user's intended minimum % of total portfolio.
+            # e.g. user wants 5% min, cash=5% → equity fraction=0.95
+            # optimizer must enforce 5/0.95 = 5.26% so after ×0.95 → 5.0% ✅
+            equity_scale_frontier = 1.0 - cash_pct
+            adjusted_lower_limit = lower_limit / equity_scale_frontier if equity_scale_frontier > 0 else lower_limit
+
             # Generate random portfolios (the dots)
             random_df = generate_random_portfolios(
                 mean_returns,
                 cov_matrix,
                 risk_free,
                 num_portfolios=num_random,
-                lower_limit=lower_limit
+                lower_limit=adjusted_lower_limit
             )
             
             # Generate efficient frontier curve (the red line)
@@ -994,7 +1165,7 @@ with tab_frontier:
                 mean_returns,
                 cov_matrix,
                 risk_free,
-                lower_limit=lower_limit,
+                lower_limit=adjusted_lower_limit,
                 num_points=50
             )
                         # Calculate current portfolio position
@@ -1259,42 +1430,57 @@ with tab_frontier:
             # === SHOW OPTIMAL WEIGHTS ===
             st.subheader("📊 Optimal Portfolio Allocation")
             st.write(f"These weights would give you **{optimal_at_risk['return']*100:.2f}% return** at **{optimal_at_risk['volatility']*100:.2f}% risk**:")
-            
-            # Get optimal weights
+
+            # Get optimal weights (from optimizer — sums to 100% equity)
             optimal_weights = optimal_at_risk['weights']
-            
-            # Create comparison table
+
+            # ✅ V2: Scale by equity fraction so total = 100% with cash
+            equity_scale = 1.0 - cash_pct
+            optimal_weights_scaled = optimal_weights * equity_scale
+
             # Get company names
             ticker_names = get_stock_names(returns.columns.tolist())
-
-            # ✅ FIX: Use currently active weights (manual or optimized)
-            if st.session_state.get("use_optimized") and st.session_state.get("opt_weights"):
-                current_active_weights = np.array(st.session_state["opt_weights"])
-            else:
-                current_active_weights = current['weights']
 
             weights_comparison = pd.DataFrame({
                 'Company': [ticker_names[t] for t in returns.columns.tolist()],
                 'Ticker': returns.columns.tolist(),
-                'Optimal Weight (%)': (optimal_weights * 100).round(2),
+                'Optimal Weight (%)': (optimal_weights_scaled * 100).round(2),
             })
-            # Sort by optimal weight (highest first)
-            weights_comparison = weights_comparison.sort_values('Optimal Weight (%)', ascending=False).reset_index(drop=True)
-            
-            # Style the dataframe
+
+            # Add cash row if applicable
+            if cash_pct > 0:
+                cash_row = pd.DataFrame([{
+                    'Company': '💵 Cash (Risk-Free)',
+                    'Ticker': 'CASH',
+                    'Optimal Weight (%)': round(cash_pct * 100, 2)
+                }])
+                weights_comparison = pd.concat([weights_comparison, cash_row], ignore_index=True)
+
+            # Sort equities by weight descending (keep cash at bottom)
+            equity_rows = weights_comparison[weights_comparison['Ticker'] != 'CASH'].sort_values('Optimal Weight (%)', ascending=False)
+            cash_rows = weights_comparison[weights_comparison['Ticker'] == 'CASH']
+
+            # Total row
+            total_val = round(weights_comparison['Optimal Weight (%)'].sum(), 2)
+            total_row = pd.DataFrame([{'Company': 'TOTAL', 'Ticker': '—', 'Optimal Weight (%)': total_val}])
+            weights_comparison = pd.concat([equity_rows, cash_rows, total_row], ignore_index=True)
+
+            if cash_pct > 0:
+                st.caption(f"✅ Equity weights scaled to {equity_scale*100:.1f}% of portfolio. Cash ({cash_pct*100:.1f}%) is fixed.")
+
             st.dataframe(
                 weights_comparison,
                 use_container_width=True,
                 hide_index=True
             )
-            
 
-            # ✅ CORRECTED: Apply button
+            # ✅ Apply button
             st.divider()
             if st.button("✅ Apply Optimal Weights to Portfolio", type="primary", use_container_width=True):
-                st.session_state["loaded_weights"] = optimal_weights.tolist()
-                st.session_state["use_optimized"] = True  # ✅ Enable optimized mode
-                st.session_state["opt_weights"] = optimal_weights.tolist()  # ✅ Store in opt_weights
+                # Store SCALED weights (sum to 1-cash_pct) so equity + cash = 100% ✅
+                st.session_state["loaded_weights"] = optimal_weights_scaled.tolist()
+                st.session_state["use_optimized"] = True
+                st.session_state["opt_weights"] = optimal_weights_scaled.tolist()
                 st.success("✅ Optimal weights loaded! Scroll up to see updated portfolio.")
                 st.balloons()
                 st.rerun()
@@ -1429,11 +1615,13 @@ try:
     
     if "opt_stats" in st.session_state:
         opt_ret, opt_vol, opt_sharpe = st.session_state["opt_stats"]
-        manual_weights_array = np.array(weights)
+        raw_w = np.array(weights)
+        eq_total = raw_w.sum()
+        manual_weights_norm_ai = raw_w / eq_total if eq_total > 0 else raw_w
         mean_returns_opt = returns.mean() * 252
         cov_matrix_opt = returns.cov() * 252
         manual_ret, manual_vol, manual_sharpe = portfolio_stats(
-            manual_weights_array, mean_returns_opt, cov_matrix_opt, risk_free
+            manual_weights_norm_ai, mean_returns_opt, cov_matrix_opt, risk_free
         )
         current_sharpe_value = manual_sharpe
         optimized_sharpe_value = opt_sharpe
@@ -1473,6 +1661,92 @@ try:
         monte_p95 = np.percentile(final_values, 95)
         monte_days = num_days if 'num_days' in locals() else None
         
+    # ── Risk Attribution (MCTR) data for AI ──────────────────────────────
+    risk_attr_for_ai = None
+    try:
+        _mean_r_ai = returns.mean() * 252
+        _cov_ai    = returns.cov() * 252
+        _tnames_ai = get_stock_names(tickers_list)
+        _mctr_ai   = compute_mctr(
+            weights=np.array(weights),
+            cov_matrix=_cov_ai,
+            tickers=tickers_list,
+            ticker_names=_tnames_ai,
+            cash_pct=cash_pct
+        )
+        if not _mctr_ai.empty:
+            _eq_ai  = _mctr_ai[_mctr_ai["Ticker"] != "CASH"]
+            _w_eq   = np.array(weights)
+            _w_norm = _w_eq / _w_eq.sum() if _w_eq.sum() > 0 else _w_eq
+            _pvol   = np.sqrt(float(_w_norm @ _cov_ai.values @ _w_norm))
+            _dr     = diversification_ratio(np.array(weights), _cov_ai)
+            _top    = _eq_ai.loc[_eq_ai["% Risk Contribution"].idxmax()]
+            # best diversifier: lowest risk-contrib / weight ratio
+            _eq_nz  = _eq_ai[_eq_ai["Weight (%)"] > 0].copy()
+            _eq_nz["_ratio"] = _eq_nz["% Risk Contribution"] / _eq_nz["Weight (%)"]
+            _best   = _eq_nz.loc[_eq_nz["_ratio"].idxmin()]
+            # compact per-asset breakdown string
+            _breakdown = " | ".join(
+                f"{r['Ticker']} {r['% Risk Contribution']:.1f}%"
+                for _, r in _eq_ai.iterrows()
+            )
+            risk_attr_for_ai = {
+                "diversification_ratio": round(_dr, 2),
+                "equity_vol_pct":        round(_pvol * 100, 2),
+                "top_risk_name":         _top["Company"],
+                "top_risk_pct":          round(_top["% Risk Contribution"], 1),
+                "top_risk_weight":       round(_top["Weight (%)"], 1),
+                "best_diversifier_name": _best["Company"],
+                "best_diversifier_risk_pct":   round(_best["% Risk Contribution"], 1),
+                "best_diversifier_weight":     round(_best["Weight (%)"], 1),
+                "risk_breakdown_str":    _breakdown,
+            }
+    except Exception:
+        risk_attr_for_ai = None
+
+    # ── Return Attribution (Brinson) data for AI ─────────────────────────
+    return_attr_for_ai = None
+    try:
+        _bench_ret_ai, _ = benchmark_series(benchmark_symbol, adjusted_start, end_date)
+        if hasattr(_bench_ret_ai.index, "tz") and _bench_ret_ai.index.tz is not None:
+            _bench_ret_ai.index = _bench_ret_ai.index.tz_localize(None)
+        _tnames_attr_ai = get_stock_names(tickers_list)
+        _attr_ai = brinson_attribution(
+            returns_data=returns,
+            weights=np.array(weights),
+            benchmark_returns=_bench_ret_ai,
+            tickers=tickers_list,
+            ticker_names=_tnames_attr_ai,
+            cash_pct=cash_pct,
+            risk_free_rate=risk_free,
+        )
+        _sdf    = _attr_ai["stock_df"]
+        _eq_df  = _sdf[_sdf["Ticker"] != "CASH"]
+        _boosters = _eq_df[_eq_df["Role"] == "🟢 Booster"]
+        _drags    = _eq_df[_eq_df["Role"] == "🔴 Drag"]
+        _top_b    = _eq_df.loc[_eq_df["Active Contribution (%)"].idxmax()] if not _eq_df.empty else None
+        _top_d    = _eq_df.loc[_eq_df["Active Contribution (%)"].idxmin()] if not _eq_df.empty else None
+        _cash_r   = _sdf[_sdf["Ticker"] == "CASH"]
+        return_attr_for_ai = {
+            "portfolio_return":  _attr_ai["portfolio_return"],
+            "benchmark_return":  _attr_ai["benchmark_return"],
+            "active_return":     _attr_ai["active_return_geo"],
+            "num_boosters":      len(_boosters),
+            "total_boost":       round(_boosters["Active Contribution (%)"].sum(), 2),
+            "num_drags":         len(_drags),
+            "total_drag":        round(_drags["Active Contribution (%)"].sum(), 2),
+            "top_booster_name":  _top_b["Company"]    if _top_b is not None else "N/A",
+            "top_booster_contrib": round(_top_b["Active Contribution (%)"], 2) if _top_b is not None else "N/A",
+            "top_booster_return":  round(_top_b["Stock Return (%)"], 2)         if _top_b is not None else "N/A",
+            "top_drag_name":     _top_d["Company"]    if _top_d is not None else "N/A",
+            "top_drag_contrib":  round(_top_d["Active Contribution (%)"], 2)   if _top_d is not None else "N/A",
+            "top_drag_return":   round(_top_d["Stock Return (%)"], 2)           if _top_d is not None else "N/A",
+            "cash_pct":          cash_pct * 100,
+            "cash_contrib":      round(_cash_r["Active Contribution (%)"].values[0], 2) if not _cash_r.empty else 0,
+        }
+    except Exception:
+        return_attr_for_ai = None
+
     # Collect all data
     ai_portfolio_data = collect_portfolio_data(
         tickers_list=tickers_list,
@@ -1488,20 +1762,386 @@ try:
         optimized_sharpe=optimized_sharpe_value,
         frontier_position=frontier_position,
         optimal_improvement=optimal_improvement_value,
-        target_risk=target_risk_value,  # ✅ NEW
-        monte_carlo_p5=monte_p5,  # ✅ NEW
-        monte_carlo_p50=monte_p50,  # ✅ NEW
-        monte_carlo_p95=monte_p95,  # ✅ NEW
-        monte_carlo_days=monte_days  # ✅ NEW
+        target_risk=target_risk_value,
+        monte_carlo_p5=monte_p5,
+        monte_carlo_p50=monte_p50,
+        monte_carlo_p95=monte_p95,
+        monte_carlo_days=monte_days,
+        cash_pct=cash_pct * 100,  # ✅ V2: Cash component (pass as % for AI display)
+        risk_attribution_data=risk_attr_for_ai,
+        return_attribution_data=return_attr_for_ai,
     )
     
 except Exception as e:
     st.error(f"Error collecting AI data: {str(e)}")
     ai_portfolio_data = None
 
+
 if 'metrics' in locals() and ai_portfolio_data is not None:
     render_sidebar_summary(ai_portfolio_data)
 
+# ============================================
+# MCTR / RISK ATTRIBUTION TAB
+# ============================================
+with tab_mctr:
+    st.header("📐 Risk Attribution (MCTR)")
+    st.write("""
+    **Marginal Contribution to Risk (MCTR)** decomposes your portfolio's total volatility
+    into each asset's individual contribution. This reveals which positions are truly
+    driving your risk — and which are providing diversification benefit.
+    """)
+
+    # Compute annualised cov matrix from equity returns only
+    mean_returns_mctr = returns.mean() * 252
+    cov_matrix_mctr = returns.cov() * 252
+
+    # Get company names
+    ticker_names_mctr = get_stock_names(tickers_list)
+
+    # Compute MCTR — pass the actual weights (already scaled by 1-cash_pct)
+    mctr_df = compute_mctr(
+        weights=np.array(weights),
+        cov_matrix=cov_matrix_mctr,
+        tickers=tickers_list,
+        ticker_names=ticker_names_mctr,
+        cash_pct=cash_pct
+    )
+
+    if mctr_df.empty:
+        st.warning("⚠️ Unable to compute risk attribution. Check your portfolio inputs.")
+    else:
+        # ── Portfolio-level stats ──────────────────────────────────────────
+        w_eq = np.array(weights)
+        w_eq_norm = w_eq / w_eq.sum() if w_eq.sum() > 0 else w_eq
+        port_vol_mctr = np.sqrt(float(w_eq_norm @ cov_matrix_mctr.values @ w_eq_norm))
+        dr = diversification_ratio(np.array(weights), cov_matrix_mctr)
+
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Portfolio Volatility (Equity)", f"{port_vol_mctr*100:.2f}%")
+        col_m1.caption("Annualised vol of equity portion only.")
+
+        col_m2.metric("Diversification Ratio", f"{dr:.2f}x")
+        col_m2.caption("Weighted avg vol ÷ portfolio vol. Higher = better diversified.")
+
+        # Largest risk contributor
+        equity_only = mctr_df[mctr_df["Ticker"] != "CASH"]
+        if not equity_only.empty:
+            top_risk_asset = equity_only.loc[equity_only["% Risk Contribution"].idxmax()]
+            col_m3.metric(
+                "Largest Risk Contributor",
+                top_risk_asset["Company"][:20],
+                f"{top_risk_asset['% Risk Contribution']:.1f}% of risk"
+            )
+            col_m3.caption(f"Ticker: {top_risk_asset['Ticker']}")
+
+        st.divider()
+
+        # ── % Risk Contribution bar chart ─────────────────────────────────
+        st.subheader("📊 % Risk Contribution per Asset")
+        st.caption("How much of the portfolio's total volatility each position contributes.")
+
+        chart_df = mctr_df[mctr_df["Ticker"] != "CASH"].copy()
+        chart_df = chart_df.sort_values("% Risk Contribution", ascending=False)
+
+        bar_chart = (
+            alt.Chart(chart_df)
+            .mark_bar()
+            .encode(
+                x=alt.X(
+                    "Company:N",
+                    sort="-y",
+                    title=None,
+                    axis=alt.Axis(labelAngle=-45, labelOverlap=False, labelLimit=150)
+                ),
+                y=alt.Y("% Risk Contribution:Q", title="% of Total Portfolio Risk"),
+                color=alt.Color(
+                    "% Risk Contribution:Q",
+                    scale=alt.Scale(scheme="reds"),
+                    legend=None
+                ),
+                tooltip=[
+                    alt.Tooltip("Company:N", title="Asset"),
+                    alt.Tooltip("Ticker:N", title="Ticker"),
+                    alt.Tooltip("Weight (%):Q", title="Weight (%)", format=".2f"),
+                    alt.Tooltip("% Risk Contribution:Q", title="% Risk Contribution", format=".2f"),
+                    alt.Tooltip("MCTR (%):Q", title="MCTR (%)", format=".4f"),
+                ]
+            )
+            .properties(height=380)
+        )
+        st.altair_chart(bar_chart, use_container_width=True)
+
+        # ── Full attribution table ─────────────────────────────────────────
+        st.subheader("📋 Full Risk Attribution Table")
+
+        # Sort equities by risk contribution descending, cash at bottom
+        equity_rows_mctr = mctr_df[mctr_df["Ticker"] != "CASH"].sort_values(
+            "% Risk Contribution", ascending=False
+        )
+        cash_rows_mctr = mctr_df[mctr_df["Ticker"] == "CASH"]
+
+        # Total row
+        total_mctr_row = pd.DataFrame([{
+            "Company": "TOTAL",
+            "Ticker": "—",
+            "Weight (%)": round(mctr_df["Weight (%)"].sum(), 2),
+            "MCTR (%)": "",
+            "% Risk Contribution": round(equity_only["% Risk Contribution"].sum(), 2),
+            "Abs Risk Contrib (%)": "",
+        }])
+
+        display_df = pd.concat(
+            [equity_rows_mctr, cash_rows_mctr, total_mctr_row],
+            ignore_index=True
+        )
+
+        st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+        # ── Concentration warning ──────────────────────────────────────────
+        if not equity_only.empty:
+            top_pct = equity_only["% Risk Contribution"].max()
+            if top_pct > 40:
+                st.warning(
+                    f"⚠️ **Concentration Alert:** {top_risk_asset['Company']} contributes "
+                    f"**{top_pct:.1f}%** of total portfolio risk. Consider reducing this position."
+                )
+            elif top_pct > 25:
+                st.info(
+                    f"ℹ️ **Moderate Concentration:** {top_risk_asset['Company']} drives "
+                    f"**{top_pct:.1f}%** of risk. Monitor this exposure."
+                )
+            else:
+                st.success("✅ **Well Diversified:** No single asset dominates portfolio risk.")
+
+        # ── Explainer ─────────────────────────────────────────────────────
+        with st.expander("📖 How to read this table"):
+            st.markdown("""
+**Weight (%)** — How much of your total portfolio is in this asset.
+
+**MCTR (%)** — *Marginal Contribution to Risk.* How much portfolio volatility increases
+if you add 1% more to this position. Higher MCTR = this asset is more "risk-dense."
+
+**% Risk Contribution** — This asset's share of total portfolio risk.
+All equity assets sum to 100%. Cash always contributes 0%.
+
+**Abs Risk Contrib (%)** — MCTR × Weight. The raw annualised risk each asset adds.
+These sum to total portfolio volatility.
+
+**Diversification Ratio** — If all assets were perfectly correlated, DR = 1.0.
+A DR of 1.3x means diversification is cutting your risk by ~23% vs holding each asset alone.
+
+**Key insight:** An asset with a large *weight* but low *% risk contribution* is
+acting as a diversifier. An asset with a small weight but large risk contribution
+is punching above its weight in terms of risk — consider trimming it.
+            """)
+
+# ============================================
+# ACTIVE RETURN ATTRIBUTION TAB
+# ============================================
+# ============================================
+# ACTIVE RETURN ATTRIBUTION TAB
+# ============================================
+with tab_return_attr:
+    st.header("📊 Active Return Attribution")
+    st.write(f"""
+    Shows how much each position **contributed to or detracted from** your portfolio's
+    active return vs **{benchmark_label}**. Boosters beat the benchmark; drags lagged it.
+    """)
+
+    try:
+        bench_ret_attr, _ = benchmark_series(benchmark_symbol, adjusted_start, end_date)
+
+        if hasattr(bench_ret_attr.index, "tz") and bench_ret_attr.index.tz is not None:
+            bench_ret_attr.index = bench_ret_attr.index.tz_localize(None)
+        bench_ret_attr.name = "bench"
+
+        # Align portfolio and benchmark (geometric display)
+        port_bench_aligned = pd.concat(
+            [portfolio_return.rename("Portfolio"), bench_ret_attr.rename("Benchmark")],
+            axis=1
+        ).dropna()
+
+        if port_bench_aligned.empty or len(port_bench_aligned) < 5:
+            st.warning("⚠️ Not enough overlapping data between portfolio and benchmark.")
+        else:
+            display_port_return  = float((1 + port_bench_aligned["Portfolio"]).prod() - 1) * 100
+            display_bench_return = float((1 + port_bench_aligned["Benchmark"]).prod() - 1) * 100
+
+            ticker_names_attr = get_stock_names(tickers_list)
+
+            attr_result = brinson_attribution(
+                returns_data=returns,
+                weights=np.array(weights),
+                benchmark_returns=bench_ret_attr,
+                tickers=tickers_list,
+                ticker_names=ticker_names_attr,
+                cash_pct=cash_pct,
+                risk_free_rate=risk_free,
+            )
+
+            stock_df = attr_result["stock_df"].copy()
+            active_return_geo = attr_result["active_return_geo"]
+
+            # ── Performance summary
+            st.subheader("📈 Performance Summary")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Portfolio Return", f"{display_port_return:.2f}%")
+            c2.metric(f"{benchmark_label} Return", f"{display_bench_return:.2f}%")
+            c3.metric("Active Return", f"{active_return_geo:.2f}%")
+
+            st.caption("⚖️ Contributions are adjusted for the **compounding effect** so their sum exactly matches the Portfolio's Geometric Active Return.")
+
+            st.divider()
+
+            # ── Boosters vs Drags (+ Cash if applicable)
+            equity_df = stock_df[stock_df["Ticker"] != "CASH"].copy()
+            boosters = equity_df[equity_df["Role"] == "🟢 Booster"].sort_values(
+                "Active Contribution (%)", ascending=False
+            )
+            drags = equity_df[equity_df["Role"] == "🔴 Drag"].sort_values(
+                "Active Contribution (%)"
+            )
+            cash_row_attr = stock_df[stock_df["Ticker"] == "CASH"]
+
+            # 3 columns when cash is present, 2 otherwise
+            if cash_pct > 0 and not cash_row_attr.empty:
+                col_b, col_d, col_c = st.columns(3)
+            else:
+                col_b, col_d = st.columns(2)
+                col_c = None
+
+            with col_b:
+                st.subheader(f"🟢 Boosters ({len(boosters)})")
+                st.metric("Total Boost", f"+{boosters['Active Contribution (%)'].sum():.2f}%")
+                st.dataframe(
+                    boosters[["Company", "Portfolio Wt (%)", "Stock Return (%)", "Excess Return (%)", "Active Contribution (%)"]],
+                    hide_index=True, use_container_width=True
+                )
+
+            with col_d:
+                st.subheader(f"🔴 Drags ({len(drags)})")
+                st.metric("Total Drag", f"{drags['Active Contribution (%)'].sum():.2f}%")
+                st.dataframe(
+                    drags[["Company", "Portfolio Wt (%)", "Stock Return (%)", "Excess Return (%)", "Active Contribution (%)"]],
+                    hide_index=True, use_container_width=True
+                )
+
+            if col_c is not None:
+                with col_c:
+                    _cash_contrib = cash_row_attr["Active Contribution (%)"].values[0]
+                    _cash_ret     = cash_row_attr["Stock Return (%)"].values[0]
+                    _cash_role    = cash_row_attr["Role"].values[0]
+                    _cash_sign    = "+" if _cash_contrib >= 0 else ""
+                    st.subheader("💵 Cash")
+                    st.metric(
+                        f"Cash Contribution ({cash_pct*100:.0f}%)",
+                        f"{_cash_sign}{_cash_contrib:.2f}%",
+                        help=f"Cash earned {_cash_ret:.2f}% (risk-free rate). Role: {_cash_role}"
+                    )
+                    st.caption(
+                        f"Earned **{_cash_ret:.2f}%** vs benchmark **{display_bench_return:.2f}%**. "
+                        f"Cash is a drag when the market rises faster than the risk-free rate."
+                    )
+
+            st.divider()
+
+            # ── Full table with reconciliation check
+            total_contrib_sum = round(stock_df["Active Contribution (%)"].sum(), 4)
+            st.caption(f"Check: Boost + Drag = {total_contrib_sum:.2f}% | Active Return = {active_return_geo:.2f}%")
+
+            st.dataframe(stock_df, hide_index=True, use_container_width=True)
+
+
+            # ── Active contribution bar chart
+            st.subheader("📊 Active Contribution per Stock")
+            st.caption(f"How much each position added (+) or subtracted (−) from your return vs {benchmark_label}.")
+
+            chart_df_attr = equity_df.sort_values("Active Contribution (%)", ascending=False).copy()
+            chart_df_attr["Color"] = chart_df_attr["Active Contribution (%)"].apply(
+                lambda x: "positive" if x >= 0 else "negative"
+            )
+
+            contrib_chart = (
+                alt.Chart(chart_df_attr)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Company:N", sort="-y", title=None,
+                            axis=alt.Axis(labelAngle=-45, labelLimit=150, labelOverlap=False)),
+                    y=alt.Y("Active Contribution (%):Q", title="Active Contribution (%)"),
+                    color=alt.Color(
+                        "Color:N",
+                        scale=alt.Scale(domain=["positive", "negative"], range=["#4ade80", "#ef4444"]),
+                        legend=None
+                    ),
+                    tooltip=[
+                        alt.Tooltip("Company:N", title="Stock"),
+                        alt.Tooltip("Portfolio Wt (%):Q", title="Weight (%)", format=".2f"),
+                        alt.Tooltip("Stock Return (%):Q", title="Stock Return (%)", format=".2f"),
+                        alt.Tooltip("Excess Return (%):Q", title="Excess vs Benchmark (%)", format=".2f"),
+                        alt.Tooltip("Active Contribution (%):Q", title="Active Contribution (%)", format=".4f"),
+                    ]
+                )
+                .properties(height=360)
+            )
+            zero_line = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
+                color="white", strokeDash=[4, 4], opacity=0.4
+            ).encode(y="y:Q")
+            st.altair_chart(contrib_chart + zero_line, use_container_width=True)
+
+            # ── Full table
+            st.subheader("📋 Full Attribution Table")
+
+            sorted_equity = equity_df.sort_values("Active Contribution (%)", ascending=False)
+            cash_rows_attr = stock_df[stock_df["Ticker"] == "CASH"]
+
+            total_attr_row = pd.DataFrame([{
+                "Company":                 "TOTAL",
+                "Ticker":                  "—",
+                "Portfolio Wt (%)":        round(stock_df["Portfolio Wt (%)"].sum(), 2),
+                "Stock Return (%)":        "—",
+                "Benchmark Ret (%)":       round(display_bench_return, 2),
+                "Excess Return (%)":       "—",
+                "Active Contribution (%)": total_contrib_sum,
+                "Role":                    "—",
+            }])
+
+            display_attr_df = pd.concat(
+                [sorted_equity, cash_rows_attr, total_attr_row],
+                ignore_index=True
+            )
+            st.dataframe(display_attr_df, hide_index=True, use_container_width=True)
+
+            if cash_pct > 0 and display_bench_return > 0:
+                cash_rows_disp = stock_df[stock_df["Ticker"] == "CASH"]
+                if not cash_rows_disp.empty:
+                    cash_drag_val = cash_rows_disp["Active Contribution (%)"].values[0]
+                    cash_ret_val = cash_rows_disp["Stock Return (%)"].values[0]
+                    st.caption(
+                        f"💵 Cash ({cash_pct*100:.1f}%) earned **{cash_ret_val:.2f}%** "
+                        f"(risk-free rate {risk_free*100:.2f}% p.a. compounded) and contributed "
+                        f"**{cash_drag_val:.2f}%** to active return vs {benchmark_label}."
+                    )
+
+            with st.expander("📖 Methodology & how to read this"):
+                st.markdown(f"""
+    **Performance Summary** uses true geometric (compound) returns.
+    - Portfolio Return: {display_port_return:.2f}% | {benchmark_label}: {display_bench_return:.2f}% | Active: {active_return_geo:.2f}%
+
+    **Active Contribution per Stock**
+    `Base Contribution = Portfolio Weight × (Stock Geo Return − Benchmark Geo Return)`
+
+    Because of volatility drag and daily rebalancing, the sum of base contributions will slightly miss the true geometric portfolio return. We calculate this **Compounding Residual** and distribute it across all assets proportional to their weight. 
+
+    This ensures that **all individual contributions sum exactly** to the TOTAL Active Return, giving you a mathematically reconciled view of performance.
+
+    **Boosters** — beat the benchmark → positive contribution.
+    **Drags** — lagged the benchmark → negative contribution.
+    **Cash** earns the risk-free rate. It acts as a drag when the benchmark is rising faster than the risk-free rate.
+                """)
+
+    except Exception as e:
+        st.error(f"Error computing return attribution: {str(e)}")
+        st.info("Ensure portfolio data is loaded and the date range has sufficient history.")
 # ============================================
 # AI ANALYSIS TAB
 # ============================================
@@ -1552,6 +2192,13 @@ try:
                 
                 st.session_state["loaded_tickers"] = loaded_tickers
                 st.session_state["loaded_weights"] = loaded_weights
+
+                # ✅ V2: Restore cash component if saved
+                saved_cash = selected_portfolio.get("cash_pct", 0)
+                try:
+                    st.session_state["cash_weight_pct"] = float(saved_cash) if saved_cash != "" else 0.0
+                except (ValueError, TypeError):
+                    st.session_state["cash_weight_pct"] = 0.0
                 
                 if selected_portfolio.get("optimized_weights"):
                     opt_weights_str = selected_portfolio["optimized_weights"]
@@ -1647,7 +2294,8 @@ if st.sidebar.button("💾 Save Portfolio Snapshot"):
             tickers_list,
             weights,
             portfolios_ws,
-            st.session_state.get("opt_weights") if st.session_state["use_optimized"] else None
+            st.session_state.get("opt_weights") if st.session_state["use_optimized"] else None,
+            cash_pct=cash_weight_pct  # ✅ V2: Save cash component
         )
         st.sidebar.success("✅ Saved!")
     except Exception as e:
