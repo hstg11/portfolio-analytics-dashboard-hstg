@@ -9,7 +9,8 @@ from auth import *
 from portfolio import *
 from optimizer import *
 from config import *
-from AI_insights import *  
+from AI_insights import *
+from pdf_export import generate_portfolio_pdf
 
 st.set_page_config(layout="wide")
 
@@ -2274,6 +2275,224 @@ try:
 except Exception as e:
     st.sidebar.error(f"Error loading portfolios: {e}")
 
+
+# ============================================
+# PDF EXPORT
+# ============================================
+st.sidebar.markdown("---")
+st.sidebar.subheader("📄 Export PDF Report")
+
+if st.sidebar.button("📥 Download PDF Report", use_container_width=True, type="primary"):
+    with st.sidebar:
+        with st.spinner("Building PDF…"):
+            try:
+                # ── Portfolio basics ──────────────────────────────────────
+                _ticker_names_list = [ticker_names.get(t, t) for t in tickers_list]
+                _weights_pct = [w * 100 for w in weights]
+
+                # Drawdown dates (computed in risk tab, replicate here)
+                try:
+                    _rm = cumulative.cummax()
+                    _dd = (cumulative - _rm) / _rm
+                    _dd_trough = _dd.idxmin()
+                    _dd_peak   = cumulative.loc[:_dd_trough].idxmax()
+                    dd_peak_str   = _dd_peak.strftime("%d %b %Y")
+                    dd_trough_str = _dd_trough.strftime("%d %b %Y")
+                except Exception:
+                    dd_peak_str = dd_trough_str = None
+
+                pdf_data = {
+                    # Always-present ──────────────────────────────────────
+                    "tickers_list":       tickers_list,
+                    "ticker_names_list":  _ticker_names_list,
+                    "weights_pct":        _weights_pct,
+                    "cash_pct":           cash_pct,
+                    "date_range":         f"{start_date.strftime('%d %b %Y')} – {end_date.strftime('%d %b %Y')}",
+                    "risk_free":          risk_free,
+                    "num_assets":         len(tickers_list),
+                    "metrics":            metrics,
+                    "dd_peak":            dd_peak_str,
+                    "dd_trough":          dd_trough_str,
+
+                    # Conditional sections – populated below if available ──
+                    "benchmark":    None,
+                    "monte_carlo":  None,
+                    "optimizer":    None,
+                    "frontier":     None,
+                    "mctr":         None,
+                    "return_attr":  None,
+                    "ai_analysis":  None,
+                }
+
+                # ── Benchmark ────────────────────────────────────────────
+                try:
+                    if "benchmark_returns" in dir() or "benchmark_returns" in locals() \
+                            or ("benchmark_symbol" in dir()):
+                        _bench_r, _ = benchmark_series(benchmark_symbol, adjusted_start, end_date)
+                        _aligned = pd.concat(
+                            [portfolio_return, _bench_r], axis=1
+                        ).dropna()
+                        _aligned.columns = ["Portfolio", "Bench"]
+                        _acum = (1 + _aligned).cumprod()
+                        _pt = _acum.iloc[-1]["Portfolio"] - 1
+                        _bt = _acum.iloc[-1]["Bench"] - 1
+                        _beta = portfolio_beta(_aligned["Portfolio"], _aligned["Bench"])
+                        pdf_data["benchmark"] = {
+                            "label":       benchmark_names.get(benchmark_symbol, "Benchmark"),
+                            "port_total":  _pt,
+                            "bench_total": _bt,
+                            "alpha":       (_pt - _bt) * 100,
+                            "beta":        _beta,
+                        }
+                except Exception:
+                    pass
+
+                # ── Monte Carlo ───────────────────────────────────────────
+                try:
+                    if "sim_results" in locals() and sim_results is not None:
+                        _fv = sim_results[-1, :]
+                        pdf_data["monte_carlo"] = {
+                            "p5":   float(np.percentile(_fv, 5)),
+                            "p50":  float(np.percentile(_fv, 50)),
+                            "p95":  float(np.percentile(_fv, 95)),
+                            "days": int(num_days) if "num_days" in locals() else "N/A",
+                        }
+                except Exception:
+                    pass
+
+                # ── Optimizer ─────────────────────────────────────────────
+                try:
+                    if "opt_stats" in st.session_state and "opt_weights" in st.session_state:
+                        _opt_r, _opt_v, _opt_s = st.session_state["opt_stats"]
+                        _opt_w_raw = np.array(st.session_state.get(
+                            "opt_weights_raw", st.session_state["opt_weights"]
+                        ))
+                        if abs(_opt_w_raw.sum() - 1.0) > 0.01:
+                            _opt_w_raw = _opt_w_raw / _opt_w_raw.sum()
+                        _mr = returns.mean() * 252
+                        _mc = returns.cov() * 252
+                        _raw_m = np.array(weights)
+                        _eq_t = _raw_m.sum()
+                        _man_n = _raw_m / _eq_t if _eq_t > 0 else _raw_m
+                        _man_r, _man_v, _man_s = portfolio_stats(_man_n, _mr, _mc, risk_free)
+                        _opt_w_display = np.array(st.session_state["opt_weights"])
+                        pdf_data["optimizer"] = {
+                            "manual_ret":    _man_r,
+                            "manual_vol":    _man_v,
+                            "manual_sharpe": _man_s,
+                            "opt_ret":       _opt_r,
+                            "opt_vol":       _opt_v,
+                            "opt_sharpe":    _opt_s,
+                            "opt_weights_pct": [w * 100 for w in _opt_w_display],
+                        }
+                except Exception:
+                    pass
+
+                # ── Efficient Frontier ────────────────────────────────────
+                try:
+                    if "frontier_data" in st.session_state:
+                        _fd = st.session_state["frontier_data"]
+                        _cur = _fd["current"]
+                        _top5 = _fd.get("top5")
+                        _pos = "on"
+                        if _fd.get("optimal_at_risk") is not None:
+                            _gap = _fd["optimal_at_risk"]["return"] - _cur["return"]
+                            _pos = "below" if _gap > 0.005 else ("above" if _gap < -0.005 else "on")
+                        pdf_data["frontier"] = {
+                            "current":  _cur,
+                            "position": _pos,
+                            "top5":     _top5,
+                        }
+                except Exception:
+                    pass
+
+                # ── MCTR / Risk Attribution ───────────────────────────────
+                try:
+                    _cov_pdf  = returns.cov() * 252
+                    _tn_pdf   = get_stock_names(tickers_list)
+                    _mctr_pdf = compute_mctr(
+                        weights=np.array(weights),
+                        cov_matrix=_cov_pdf,
+                        tickers=tickers_list,
+                        ticker_names=_tn_pdf,
+                        cash_pct=cash_pct,
+                    )
+                    if not _mctr_pdf.empty:
+                        _weq = np.array(weights)
+                        _wn  = _weq / _weq.sum() if _weq.sum() > 0 else _weq
+                        _ev  = float(np.sqrt(_wn @ _cov_pdf.values @ _wn)) * 100
+                        _dr  = diversification_ratio(np.array(weights), _cov_pdf)
+                        pdf_data["mctr"] = {
+                            "df":         _mctr_pdf,
+                            "equity_vol": _ev,
+                            "div_ratio":  _dr,
+                        }
+                except Exception:
+                    pass
+
+                # ── Return Attribution ────────────────────────────────────
+                try:
+                    _bench_ret_pdf, _ = benchmark_series(
+                        benchmark_symbol, adjusted_start, end_date
+                    )
+                    if hasattr(_bench_ret_pdf.index, "tz") and _bench_ret_pdf.index.tz:
+                        _bench_ret_pdf.index = _bench_ret_pdf.index.tz_localize(None)
+                    _tn_ra = get_stock_names(tickers_list)
+                    _attr_pdf = brinson_attribution(
+                        returns_data=returns,
+                        weights=np.array(weights),
+                        benchmark_returns=_bench_ret_pdf,
+                        tickers=tickers_list,
+                        ticker_names=_tn_ra,
+                        cash_pct=cash_pct,
+                        risk_free_rate=risk_free,
+                    )
+                    _sdf = _attr_pdf["stock_df"]
+                    _eq_ra = _sdf[_sdf["Ticker"] != "CASH"]
+                    _cash_ra = _sdf[_sdf["Ticker"] == "CASH"]
+                    # Build display df: equities → cash → total
+                    _total_ra = pd.DataFrame([{
+                        "Company": "TOTAL", "Ticker": "—",
+                        "Portfolio Wt (%)": round(_sdf["Portfolio Wt (%)"].sum(), 2),
+                        "Stock Return (%)": "—",
+                        "Excess Return (%)": "—",
+                        "Active Contribution (%)": round(
+                            _sdf["Active Contribution (%)"].sum(), 4),
+                    }])
+                    _display_ra = pd.concat(
+                        [_eq_ra.sort_values("Active Contribution (%)", ascending=False),
+                         _cash_ra, _total_ra],
+                        ignore_index=True
+                    )
+                    pdf_data["return_attr"] = {
+                        "df":               _display_ra,
+                        "portfolio_return": _attr_pdf["portfolio_return"],
+                        "benchmark_return": _attr_pdf["benchmark_return"],
+                        "active_return":    _attr_pdf["active_return_geo"],
+                        "num_boosters":     len(_eq_ra[_eq_ra["Role"] == "🟢 Booster"]),
+                        "num_drags":        len(_eq_ra[_eq_ra["Role"] == "🔴 Drag"]),
+                    }
+                except Exception:
+                    pass
+
+                # ── AI Analysis ───────────────────────────────────────────
+                if st.session_state.get("ai_analysis_generated") and \
+                        st.session_state.get("ai_full_analysis"):
+                    pdf_data["ai_analysis"] = st.session_state["ai_full_analysis"]
+
+                # ── Generate PDF ──────────────────────────────────────────
+                pdf_bytes = generate_portfolio_pdf(pdf_data)
+
+                st.sidebar.download_button(
+                    label="⬇️ Save PDF",
+                    data=pdf_bytes,
+                    file_name=f"portfolio_report_{datetime.date.today().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+
+            except Exception as e:
+                st.sidebar.error(f"PDF generation failed: {e}")
 
 # ✅ SAVE PORTFOLIO SECTION (UNCHANGED - Still here!)
 st.sidebar.markdown("---")
